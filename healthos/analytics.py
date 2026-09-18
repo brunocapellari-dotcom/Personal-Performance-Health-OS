@@ -4,7 +4,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from statistics import mean
 
-from .domain import Observation, PerformedSession, SessionPlan, TrainingResponse
+from .engines import StrengthEngine
+
+from .domain import Observation, PerformedSession, SessionPlan, StrengthPerformance, StrengthProgression, TrainingResponse
 
 
 @dataclass(frozen=True)
@@ -131,6 +133,90 @@ class PlannedVsPerformedEngine:
         else:
             status = "AS_PLANNED"
         return SessionResponse(round(adherence, 3), round(duration_ratio, 3), session_load, status)
+
+
+class StrengthHistoryEngine:
+    """Derive the next executable load from performed sets and known equipment loads."""
+
+    def recommend(
+        self,
+        targets: dict[str, tuple[tuple[int, int], float]],
+        performed: tuple[PerformedSession, ...],
+        load_options_kg: tuple[float, ...],
+    ) -> dict[str, StrengthProgression]:
+        latest: dict[str, tuple[datetime, tuple[object, ...]]] = {}
+        for session in performed:
+            if not session.completed:
+                continue
+            when = self._utc_time(session.performed_at)
+            for exercise in session.exercises:
+                if exercise.exercise_id not in targets or not exercise.sets:
+                    continue
+                current = latest.get(exercise.exercise_id)
+                sets_as_objects: tuple[object, ...] = tuple(exercise.sets)
+                if current is None or when >= current[0]:
+                    latest[exercise.exercise_id] = (when, sets_as_objects)
+
+        available = tuple(sorted(set(load_options_kg)))
+        output: dict[str, StrengthProgression] = {}
+        for exercise_id, (_, raw_sets) in latest.items():
+            sets = tuple(item for item in raw_sets if hasattr(item, "load_kg"))
+            loaded = tuple(
+                item
+                for item in sets
+                if getattr(item, "load_kg") is not None and getattr(item, "reps") is not None
+            )
+            if not loaded:
+                continue
+            current_load = float(getattr(loaded[-1], "load_kg"))
+            same_load = tuple(item for item in loaded if float(getattr(item, "load_kg")) == current_load)
+            reps = tuple(int(getattr(item, "reps")) for item in same_load)
+            rirs = tuple(
+                float(getattr(item, "rir"))
+                for item in same_load
+                if getattr(item, "rir") is not None
+            )
+            target_range, target_rir = targets[exercise_id]
+            if len(rirs) != len(reps):
+                output[exercise_id] = StrengthProgression(current_load, "rir_missing_hold_load")
+                continue
+            if not available:
+                output[exercise_id] = StrengthProgression(current_load, "available_loads_unknown_hold")
+                continue
+
+            higher = tuple(value for value in available if value > current_load)
+            increment = higher[0] - current_load if higher else 1.0
+            raw = StrengthEngine().next_load(
+                StrengthPerformance(
+                    exercise_id=exercise_id,
+                    load_kg=current_load,
+                    reps_by_set=reps,
+                    rir_by_set=rirs,
+                    target_rep_range=target_range,
+                    target_rir=target_rir,
+                    increment_kg=max(0.001, increment),
+                )
+            )
+            output[exercise_id] = self._snap_to_available(raw, current_load, available)
+        return output
+
+    @staticmethod
+    def _snap_to_available(
+        decision: StrengthProgression,
+        current_load: float,
+        available: tuple[float, ...],
+    ) -> StrengthProgression:
+        if decision.next_load_kg > current_load:
+            candidates = tuple(value for value in available if value >= decision.next_load_kg)
+            if not candidates:
+                return StrengthProgression(current_load, "no_higher_available_load")
+            return StrengthProgression(candidates[0], decision.rationale)
+        if decision.next_load_kg < current_load:
+            candidates = tuple(value for value in available if value <= decision.next_load_kg)
+            if not candidates:
+                return StrengthProgression(current_load, "no_lower_available_load")
+            return StrengthProgression(candidates[-1], decision.rationale)
+        return StrengthProgression(current_load, decision.rationale)
 
 
 class TrainingHistoryEngine:
