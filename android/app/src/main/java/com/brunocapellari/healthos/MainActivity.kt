@@ -188,12 +188,19 @@ class MainActivity : ComponentActivity() {
 private fun Dashboard(
     healthStatus: String,
     operationStatus: String,
+    activeSessionId: String,
     onPermissions: () -> Unit,
     onEnroll: (String) -> Unit,
     onSync: () -> Unit,
     onNextBlock: () -> Unit,
+    onRecordSession: (String, Boolean, Int, Double?, String) -> Unit,
 ) {
     var bootstrapToken by remember { mutableStateOf("") }
+    var sessionId by remember(activeSessionId) { mutableStateOf(activeSessionId) }
+    var completed by remember { mutableStateOf(true) }
+    var duration by remember { mutableStateOf("") }
+    var rpe by remember { mutableStateOf("") }
+    var notes by remember { mutableStateOf("") }
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -225,6 +232,60 @@ private fun Dashboard(
         }
         Button(onClick = onNextBlock, modifier = Modifier.fillMaxWidth()) {
             Text("Monta meu próximo bloco")
+        }
+
+        Text("Registrar treino realizado", style = MaterialTheme.typography.titleMedium)
+        OutlinedTextField(
+            value = sessionId,
+            onValueChange = { sessionId = it },
+            label = { Text("ID da sessão planejada") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Column {
+            Text("Sessão concluída")
+            Checkbox(checked = completed, onCheckedChange = { completed = it })
+        }
+        OutlinedTextField(
+            value = duration,
+            onValueChange = { duration = it.filter(Char::isDigit) },
+            label = { Text("Duração em minutos") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = rpe,
+            onValueChange = { value ->
+                rpe = value.filter { char -> char.isDigit() || char == '.' || char == ',' }
+            },
+            label = { Text("RPE da sessão (0–10, opcional)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = notes,
+            onValueChange = { if (it.length <= 5000) notes = it },
+            label = { Text("Observações") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Button(
+            onClick = {
+                val parsedDuration = duration.toIntOrNull()
+                val parsedRpe = rpe.replace(',', '.').toDoubleOrNull()
+                if (
+                    sessionId.isNotBlank() &&
+                    parsedDuration != null &&
+                    (parsedRpe == null || parsedRpe in 0.0..10.0)
+                ) {
+                    onRecordSession(sessionId, completed, parsedDuration, parsedRpe, notes)
+                    duration = ""
+                    rpe = ""
+                    notes = ""
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Salvar e sincronizar treino")
         }
         Text(operationStatus, style = MaterialTheme.typography.bodyMedium)
     }
