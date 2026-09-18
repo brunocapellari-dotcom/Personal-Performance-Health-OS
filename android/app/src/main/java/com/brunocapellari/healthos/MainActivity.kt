@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
@@ -62,7 +64,10 @@ class MainActivity : ComponentActivity() {
                         Dashboard(
                             healthStatus = healthText.value,
                             operationStatus = statusText.value,
-                            onPermissions = {
+                            onCorePermissions = {
+                                permissionsLauncher.launch(container.healthConnect.readPermissions())
+                            },
+                            onExtendedPermissions = {
                                 permissionsLauncher.launch(container.healthConnect.extendedReadPermissions())
                             },
                             onEnroll = ::enroll,
@@ -84,10 +89,21 @@ class MainActivity : ComponentActivity() {
                 healthText.value = "Health Connect indisponível neste dispositivo"
                 return@launch
             }
-            val granted = withContext(Dispatchers.IO) {
-                container.healthConnect.hasCoreReadPermissions()
+            val status = withContext(Dispatchers.IO) {
+                Triple(
+                    container.healthConnect.hasCoreReadPermissions(),
+                    container.healthConnect.hasHistoryReadPermission(),
+                    container.healthConnect.hasBackgroundReadPermission(),
+                )
             }
-            healthText.value = if (granted) "Health Connect autorizado para leitura" else "Permissões básicas do Health Connect pendentes"
+            healthText.value = if (status.first) {
+                "Health Connect autorizado; histórico ampliado: " +
+                    (if (status.second) "sim" else "não") +
+                    "; leitura em segundo plano: " +
+                    (if (status.third) "sim" else "não")
+            } else {
+                "Permissões básicas do Health Connect pendentes"
+            }
         }
     }
 
@@ -189,7 +205,8 @@ private fun Dashboard(
     healthStatus: String,
     operationStatus: String,
     activeSessionId: String,
-    onPermissions: () -> Unit,
+    onCorePermissions: () -> Unit,
+    onExtendedPermissions: () -> Unit,
     onEnroll: (String) -> Unit,
     onSync: () -> Unit,
     onNextBlock: () -> Unit,
@@ -202,13 +219,16 @@ private fun Dashboard(
     var rpe by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("Personal Performance & Health OS", style = MaterialTheme.typography.headlineSmall)
         Text(healthStatus)
-        Button(onClick = onPermissions, modifier = Modifier.fillMaxWidth()) {
-            Text("Autorizar Health Connect")
+        Button(onClick = onCorePermissions, modifier = Modifier.fillMaxWidth()) {
+            Text("Autorizar leitura básica do Health Connect")
+        }
+        Button(onClick = onExtendedPermissions, modifier = Modifier.fillMaxWidth()) {
+            Text("Autorizar histórico e segundo plano (opcional)")
         }
         OutlinedTextField(
             value = bootstrapToken,
@@ -248,7 +268,7 @@ private fun Dashboard(
         }
         OutlinedTextField(
             value = duration,
-            onValueChange = { duration = it.filter(Char::isDigit) },
+            onValueChange = { duration = it.filter { char -> char.isDigit() } },
             label = { Text("Duração em minutos") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
