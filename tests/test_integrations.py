@@ -1,3 +1,5 @@
+import pytest
+from defusedxml.common import DefusedXmlException
 from healthos.integrations import CSVObservationImporter, GPXImporter, HealthConnectContract, fit_adapter_status
 from healthos.storage import LocalObservationStore
 
@@ -28,7 +30,9 @@ def test_gpx_import_and_local_store_roundtrip():
         b"</trkseg></trk></gpx>"
     )
     observations = GPXImporter().parse(gpx)
+    repeated = GPXImporter().parse(gpx)
     assert len(observations) == 2
+    assert [item.observation_id for item in repeated] == [item.observation_id for item in observations]
     store = LocalObservationStore()
     store.append(observations)
     assert store.count() == 2
@@ -37,7 +41,9 @@ def test_gpx_import_and_local_store_roundtrip():
 def test_csv_import():
     csv_text = "metric,value,unit,observed_at\nweight,82.0,kg,2027-03-01T07:00:00+00:00\n"
     observations = CSVObservationImporter().parse(csv_text)
+    repeated = CSVObservationImporter().parse(csv_text)
     assert observations[0].value == 82.0
+    assert repeated[0].observation_id == observations[0].observation_id
 
 
 def test_fitdecode_selected_over_fitparse():
@@ -60,3 +66,20 @@ def test_local_store_is_idempotent_by_observation_id():
     assert store.append([obs]) == 1
     assert store.append([obs]) == 0
     assert store.count() == 1
+
+
+def test_gpx_rejects_xml_entities_before_feature_parser() -> None:
+    malicious = (
+        b'<?xml version="1.0"?>'
+        b'<!DOCTYPE gpx [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>'
+        b'<gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">'
+        b'<trk><trkseg><trkpt lat="0.1" lon="0.1"><time>&xxe;</time></trkpt></trkseg></trk>'
+        b'</gpx>'
+    )
+    with pytest.raises(DefusedXmlException):
+        GPXImporter().parse(malicious)
+
+
+def test_csv_requires_canonical_columns() -> None:
+    with pytest.raises(ValueError, match="missing required columns"):
+        CSVObservationImporter().parse("metric,value\nweight,82\n")
