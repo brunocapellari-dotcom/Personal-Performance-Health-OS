@@ -53,13 +53,13 @@ class ResolvedPlanningState:
 
 class PlanningStateResolver:
     def resolve(self, db: Session, *, today: date, weeks: int) -> ResolvedPlanningState:
-        goals = self._goals(db)
+        goals = self.goals(db)
         if not goals:
             raise ValueError("no active goals are synchronized")
-        environment = self._environment(db)
+        environment = self.environment(db)
         if environment is None:
             raise ValueError("no active training environment is synchronized")
-        readiness = self._readiness(db)
+        readiness = self.readiness(db)
         if readiness is None:
             raise ValueError("no readiness check-in is synchronized")
 
@@ -74,10 +74,10 @@ class PlanningStateResolver:
             goals=goals,
             environment=environment,
             readiness=readiness,
-            nutrition_trend=self._nutrition(db),
-            event=self._event(db, today),
-            training_response=self._training_response(db),
-            availability=self._availability(db, today, weeks),
+            nutrition_trend=self.nutrition(db),
+            event=self.event(db, today),
+            training_response=self.training_response(db),
+            availability=self.availability(db, today, weeks),
         )
 
     def _active(self, db: Session, entity_type: str) -> tuple[EntityRecordModel, ...]:
@@ -93,7 +93,7 @@ class PlanningStateResolver:
         rows = self._active(db, entity_type)
         return rows[0] if rows else None
 
-    def _goals(self, db: Session) -> tuple[Goal, ...]:
+    def goals(self, db: Session) -> tuple[Goal, ...]:
         goals: list[Goal] = []
         for row in self._active(db, "goal"):
             payload = GoalPayload.model_validate(row.payload)
@@ -113,7 +113,7 @@ class PlanningStateResolver:
             )
         return tuple(sorted(goals, key=lambda item: (-item.priority, item.goal_id)))
 
-    def _environment(self, db: Session) -> TrainingEnvironment | None:
+    def environment(self, db: Session) -> TrainingEnvironment | None:
         row = self._latest(db, "training_environment")
         if row is None:
             return None
@@ -128,7 +128,7 @@ class PlanningStateResolver:
             available_minutes=payload.available_minutes,
         )
 
-    def _readiness(self, db: Session) -> ReadinessInput | None:
+    def readiness(self, db: Session) -> ReadinessInput | None:
         row = self._latest(db, "readiness")
         if row is None:
             return None
@@ -145,7 +145,7 @@ class PlanningStateResolver:
             pain_flag=payload.pain_flag,
         )
 
-    def _nutrition(self, db: Session) -> NutritionTrend | None:
+    def nutrition(self, db: Session) -> NutritionTrend | None:
         row = self._latest(db, "nutrition_trend")
         if row is None:
             return None
@@ -158,7 +158,7 @@ class PlanningStateResolver:
             current_tdee_estimate_kcal=payload.current_tdee_estimate_kcal,
         )
 
-    def _event(self, db: Session, today: date) -> Event | None:
+    def event(self, db: Session, today: date) -> Event | None:
         candidates: list[Event] = []
         for row in self._active(db, "event"):
             payload = EventPayload.model_validate(row.payload)
@@ -179,7 +179,7 @@ class PlanningStateResolver:
             return None
         return sorted(candidates, key=lambda item: (-item.priority, item.event_date, item.event_id))[0]
 
-    def _availability(self, db: Session, today: date, weeks: int) -> tuple[AvailabilityWindow, ...]:
+    def availability(self, db: Session, today: date, weeks: int) -> tuple[AvailabilityWindow, ...]:
         end = today + timedelta(days=weeks * 7 - 1)
         by_day: dict[date, AvailabilityWindow] = {}
         for row in self._active(db, "calendar_availability"):
@@ -202,7 +202,7 @@ class PlanningStateResolver:
                 latest[payload.metric] = (ordering, payload.value)
         return {metric: value for metric, (_, value) in latest.items()}
 
-    def _training_response(self, db: Session) -> TrainingResponse | None:
+    def training_response(self, db: Session) -> TrainingResponse | None:
         derived = self._derive_training_response(db)
         if derived is not None:
             return derived
