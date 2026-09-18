@@ -58,13 +58,25 @@ class HealthConnectGateway(private val context: Context) {
     fun readPermissions(): Set<String> = TrackedHealthType.entries
         .mapTo(mutableSetOf()) { HealthPermission.getReadPermission(it.recordClass) }
 
+    fun backgroundReadPermission(): String = HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND
+
+    fun historyReadPermission(): String = HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY
+
     fun extendedReadPermissions(): Set<String> = readPermissions() + setOf(
-        HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND,
-        HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY,
+        backgroundReadPermission(),
+        historyReadPermission(),
     )
 
+    suspend fun grantedPermissions(): Set<String> = client.permissionController.getGrantedPermissions()
+
     suspend fun hasPermissions(permissions: Set<String> = readPermissions()): Boolean =
-        client.permissionController.getGrantedPermissions().containsAll(permissions)
+        grantedPermissions().containsAll(permissions)
+
+    suspend fun hasCoreReadPermissions(): Boolean = hasPermissions(readPermissions())
+
+    suspend fun hasBackgroundReadPermission(): Boolean = grantedPermissions().contains(backgroundReadPermission())
+
+    suspend fun hasHistoryReadPermission(): Boolean = grantedPermissions().contains(historyReadPermission())
 
     suspend fun newToken(type: TrackedHealthType): String = client.getChangesToken(
         ChangesTokenRequest(recordTypes = setOf(type.recordClass)),
