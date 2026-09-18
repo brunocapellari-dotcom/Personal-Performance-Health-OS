@@ -24,6 +24,22 @@ class DeviceModel(Base):
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class PairingTokenModel(Base):
+    __tablename__ = "pairing_tokens"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    issued_by_device_id: Mapped[str] = mapped_column(
+        ForeignKey("devices.device_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (Index("ix_pairing_tokens_expires", "expires_at"),)
+
+
 class AuthChallengeModel(Base):
     __tablename__ = "auth_challenges"
 
