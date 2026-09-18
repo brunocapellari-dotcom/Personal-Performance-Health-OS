@@ -3,10 +3,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from statistics import mean
+from typing import cast
 
+from .domain import (
+    Observation,
+    PerformedSession,
+    PerformedSet,
+    SessionPlan,
+    StrengthPerformance,
+    StrengthProgression,
+    TrainingResponse,
+)
 from .engines import StrengthEngine
-
-from .domain import Observation, PerformedSession, PerformedSet, SessionPlan, StrengthPerformance, StrengthProgression, TrainingResponse
 
 
 @dataclass(frozen=True)
@@ -162,9 +170,9 @@ class StrengthHistoryEngine:
             loaded = tuple(item for item in sets if item.load_kg is not None and item.reps is not None)
             if not loaded:
                 continue
-            current_load = float(loaded[-1].load_kg)
-            same_load = tuple(item for item in loaded if float(item.load_kg) == current_load)
-            reps = tuple(int(item.reps) for item in same_load)
+            current_load = float(cast(float, loaded[-1].load_kg))
+            same_load = tuple(item for item in loaded if float(cast(float, item.load_kg)) == current_load)
+            reps = tuple(int(cast(int, item.reps)) for item in same_load)
             rirs = tuple(float(item.rir) for item in same_load if item.rir is not None)
             target_range, target_rir = targets[exercise_id]
             if len(rirs) != len(reps):
@@ -189,6 +197,14 @@ class StrengthHistoryEngine:
             )
             output[exercise_id] = self._snap_to_available(raw, current_load, available)
         return output
+
+    @staticmethod
+    def _utc_time(value: datetime | None) -> datetime:
+        if value is None:
+            return datetime.min.replace(tzinfo=UTC)
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
     @staticmethod
     def _snap_to_available(
@@ -248,7 +264,6 @@ class TrainingHistoryEngine:
             avg_rpe=None if not rpes else round(mean(rpes), 2),
             load_ratio=load_ratio,
         )
-
 
     @staticmethod
     def _utc_time(value: datetime | None) -> datetime:
