@@ -276,9 +276,31 @@ class Observation:
 
 
 @dataclass(frozen=True)
+class PerformedSet:
+    set_number: int
+    reps: int | None = None
+    load_kg: float | None = None
+    rir: float | None = None
+    rpe: float | None = None
+    duration_seconds: int | None = None
+    distance_m: float | None = None
+
+
+@dataclass(frozen=True)
+class PerformedExercise:
+    exercise_id: str
+    sets: tuple[PerformedSet, ...]
+
+
+@dataclass(frozen=True)
 class PerformedSession:
     planned_session_id: str
     completed: bool
     duration_minutes: int
     rpe: float | None
     notes: str = ""
+    performed_at: datetime | None = None
+    avg_hr_bpm: float | None = None
+    max_hr_bpm: float | None = None
+    distance_m: float | None = None
+    exercises: tuple[PerformedExercise, ...] = ()
