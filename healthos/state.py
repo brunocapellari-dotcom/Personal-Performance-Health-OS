@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import TypeVar
 
 from sqlalchemy import select
@@ -193,7 +193,7 @@ class PlanningStateResolver:
         return tuple(by_day[day] for day in sorted(by_day))
 
     def _latest_assessments(self, db: Session) -> dict[str, float]:
-        latest: dict[str, tuple[object, float]] = {}
+        latest: dict[str, tuple[datetime, float]] = {}
         for row in self._active(db, "assessment_result"):
             payload = AssessmentResultPayload.model_validate(row.payload)
             previous = latest.get(payload.metric)
