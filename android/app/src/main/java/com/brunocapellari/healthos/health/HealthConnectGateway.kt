@@ -51,12 +51,12 @@ data class ChangeBatch(
 class HealthConnectTokenExpiredException : IllegalStateException("Health Connect changes token expired")
 
 interface HealthConnectPort {
-    override suspend fun hasCoreReadPermissions(): Boolean
-    override suspend fun hasBackgroundReadPermission(): Boolean
-    override suspend fun hasHistoryReadPermission(): Boolean
-    override suspend fun newToken(type: TrackedHealthType): String
+    suspend fun hasCoreReadPermissions(): Boolean
+    suspend fun hasBackgroundReadPermission(): Boolean
+    suspend fun hasHistoryReadPermission(): Boolean
+    suspend fun newToken(type: TrackedHealthType): String
     suspend fun backfill(type: TrackedHealthType, start: Instant, end: Instant): List<HealthDelta>
-    override suspend fun drain(type: TrackedHealthType, token: String): ChangeBatch
+    suspend fun drain(type: TrackedHealthType, token: String): ChangeBatch
 }
 
 class HealthConnectGateway private constructor(
@@ -86,13 +86,13 @@ class HealthConnectGateway private constructor(
     suspend fun hasPermissions(permissions: Set<String> = readPermissions()): Boolean =
         grantedPermissions().containsAll(permissions)
 
-    suspend fun hasCoreReadPermissions(): Boolean = hasPermissions(readPermissions())
+    override suspend fun hasCoreReadPermissions(): Boolean = hasPermissions(readPermissions())
 
-    suspend fun hasBackgroundReadPermission(): Boolean = grantedPermissions().contains(backgroundReadPermission())
+    override suspend fun hasBackgroundReadPermission(): Boolean = grantedPermissions().contains(backgroundReadPermission())
 
-    suspend fun hasHistoryReadPermission(): Boolean = grantedPermissions().contains(historyReadPermission())
+    override suspend fun hasHistoryReadPermission(): Boolean = grantedPermissions().contains(historyReadPermission())
 
-    suspend fun newToken(type: TrackedHealthType): String = client.getChangesToken(
+    override suspend fun newToken(type: TrackedHealthType): String = client.getChangesToken(
         ChangesTokenRequest(recordTypes = setOf(type.recordClass)),
     )
 
@@ -110,7 +110,7 @@ class HealthConnectGateway private constructor(
         TrackedHealthType.TOTAL_CALORIES -> readAll(TotalCaloriesBurnedRecord::class, start, end).map { normalize(type, it) }
     }
 
-    suspend fun drain(type: TrackedHealthType, token: String): ChangeBatch {
+    override suspend fun drain(type: TrackedHealthType, token: String): ChangeBatch {
         val deltas = mutableListOf<HealthDelta>()
         var next = token
         do {
