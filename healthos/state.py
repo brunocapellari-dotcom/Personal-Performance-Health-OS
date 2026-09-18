@@ -126,6 +126,7 @@ class PlanningStateResolver:
             noise_limit=payload.noise_limit,
             surface=payload.surface,
             available_minutes=payload.available_minutes,
+            load_options_kg=tuple(sorted(payload.load_options_kg)),
         )
 
     def readiness(self, db: Session) -> ReadinessInput | None:
