@@ -129,6 +129,34 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun recordSession(
+        plannedSessionId: String,
+        completed: Boolean,
+        durationMinutes: Int,
+        rpe: Double?,
+        notes: String,
+    ) {
+        lifecycleScope.launch {
+            statusText.value = "Registrando treino realizado"
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    container.repository.recordPerformedSession(
+                        plannedSessionId = plannedSessionId,
+                        completed = completed,
+                        durationMinutes = durationMinutes,
+                        rpe = rpe,
+                        notes = notes,
+                    )
+                    container.repository.fullSync()
+                }
+            }.onSuccess {
+                statusText.value = "Treino realizado registrado e sincronizado"
+            }.onFailure {
+                statusText.value = "Falha ao registrar treino: ${it.message ?: "erro desconhecido"}"
+            }
+        }
+    }
+
     private fun nextBlock() {
         lifecycleScope.launch {
             statusText.value = "Montando próximo bloco"
