@@ -16,6 +16,7 @@ from .domain import (
     ReadinessInput,
     StrengthPerformance,
     StrengthProgression,
+    TrainingResponse,
 )
 
 
@@ -37,11 +38,12 @@ class GoalGapEngine:
     def calculate(self, goals: tuple[Goal, ...]) -> dict[str, GoalGap]:
         output: dict[str, GoalGap] = {}
         for goal in goals:
-            if goal.baseline is None or goal.target is None:
+            reference = goal.current if goal.current is not None else goal.baseline
+            if reference is None or goal.target is None:
                 output[goal.goal_id] = GoalGap(goal.goal_id, None, None, None)
                 continue
-            gap = goal.target - goal.baseline
-            relative = None if goal.baseline == 0 else gap / abs(goal.baseline) * 100.0
+            gap = goal.target - reference
+            relative = None if reference == 0 else gap / abs(reference) * 100.0
             output[goal.goal_id] = GoalGap(
                 goal.goal_id,
                 round(gap, 4),
@@ -137,6 +139,64 @@ class AdaptiveNutritionEngine:
         blended = (1 - weight) * trend.current_tdee_estimate_kcal + weight * inferred
         confidence = "medium" if trend.days < 28 else "high"
         return NutritionDecision(round(inferred, 0), round(blended, 0), confidence)
+
+
+@dataclass(frozen=True)
+class TrainingResponseDecision:
+    adherence: float
+    volume_modifier: float
+    target_sessions_per_week: int
+    reasons: tuple[str, ...]
+
+
+class TrainingResponseEngine:
+    """Convert recent execution into conservative deterministic planning adjustments."""
+
+    def evaluate(self, response: TrainingResponse | None) -> TrainingResponseDecision:
+        if response is None or response.sessions_planned == 0:
+            return TrainingResponseDecision(1.0, 1.0, 3, ("no_recent_response_constraint",))
+        if response.sessions_planned < 0 or response.sessions_completed < 0:
+            raise ValueError("session counts cannot be negative")
+        if response.sessions_completed > response.sessions_planned:
+            raise ValueError("completed sessions cannot exceed planned sessions")
+        if response.avg_rpe is not None and not 0 <= response.avg_rpe <= 10:
+            raise ValueError("avg_rpe must be between 0 and 10")
+        if response.load_ratio is not None and response.load_ratio < 0:
+            raise ValueError("load_ratio cannot be negative")
+
+        adherence = response.sessions_completed / response.sessions_planned
+        volume_modifier = 1.0
+        target_sessions = 3
+        reasons: list[str] = []
+
+        if adherence < 0.5:
+            volume_modifier = 0.8
+            target_sessions = 2
+            reasons.append("low_adherence")
+        elif adherence < 0.75:
+            volume_modifier = 0.9
+            target_sessions = 2
+            reasons.append("moderate_adherence")
+
+        if response.avg_rpe is not None and response.avg_rpe >= 9:
+            volume_modifier = min(volume_modifier, 0.85)
+            target_sessions = min(target_sessions, 2)
+            reasons.append("high_recent_rpe")
+
+        if response.load_ratio is not None and response.load_ratio > 1.2:
+            volume_modifier = min(volume_modifier, 0.85)
+            target_sessions = min(target_sessions, 2)
+            reasons.append("recent_load_overrun")
+
+        if not reasons:
+            reasons.append("recent_response_supports_normal_frequency")
+
+        return TrainingResponseDecision(
+            adherence=round(adherence, 3),
+            volume_modifier=volume_modifier,
+            target_sessions_per_week=target_sessions,
+            reasons=tuple(reasons),
+        )
 
 
 class PeriodizationEngine:
