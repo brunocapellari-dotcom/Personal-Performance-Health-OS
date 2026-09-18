@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from .auth import canonical_json, sha256_hex
@@ -25,6 +25,7 @@ def append_audit(
     target: str,
     payload: object,
 ) -> AuditLogModel:
+    _serialize_audit_writer(db)
     previous = db.scalar(select(AuditLogModel).order_by(AuditLogModel.audit_seq.desc()).limit(1))
     prev_hash = previous.entry_hash if previous is not None else _GENESIS_HASH
     event_id = uuid4().hex
@@ -76,6 +77,14 @@ def verify_audit_chain(db: Session, settings: Settings) -> bool:
         previous_hash = entry.entry_hash
     return True
 
+
+
+def _serialize_audit_writer(db: Session) -> None:
+    if db.bind is None or db.bind.dialect.name != "postgresql":
+        return
+    # Fixed transaction-scoped advisory lock dedicated to the single canonical audit chain.
+    # This prevents concurrent writers from observing the same previous hash and forking the chain.
+    db.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": 31051990544344148})
 
 def _audit_key(settings: Settings) -> bytes:
     if settings.audit_hmac_key:
