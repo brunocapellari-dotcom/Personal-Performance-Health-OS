@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from statistics import mean
 
 from .domain import Observation, PerformedSession, SessionPlan, TrainingResponse
@@ -150,8 +150,8 @@ class TrainingHistoryEngine:
             if existing is None:
                 performed_by_id[session.planned_session_id] = session
                 continue
-            existing_time = existing.performed_at or datetime.min
-            candidate_time = session.performed_at or datetime.min
+            existing_time = self._utc_time(existing.performed_at)
+            candidate_time = self._utc_time(session.performed_at)
             if candidate_time >= existing_time:
                 performed_by_id[session.planned_session_id] = session
 
@@ -172,6 +172,15 @@ class TrainingHistoryEngine:
             avg_rpe=None if not rpes else round(mean(rpes), 2),
             load_ratio=load_ratio,
         )
+
+
+    @staticmethod
+    def _utc_time(value: datetime | None) -> datetime:
+        if value is None:
+            return datetime.min.replace(tzinfo=UTC)
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
 
 @dataclass(frozen=True)
