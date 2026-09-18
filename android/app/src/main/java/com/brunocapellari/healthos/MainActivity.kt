@@ -18,6 +18,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -30,11 +31,27 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+
+data class PlannedExerciseUi(
+    val exerciseId: String,
+    val plannedSets: Int,
+    val suggestedLoadKg: Double?,
+    val targetRir: Double,
+)
+
+data class ExerciseLogValues(
+    val loadKg: String = "",
+    val repsCsv: String = "",
+    val rirCsv: String = "",
+)
 
 class MainActivity : ComponentActivity() {
     private val statusText = mutableStateOf("Inicializando")
     private val healthText = mutableStateOf("Health Connect não verificado")
     private val activeSessionId = mutableStateOf("")
+    private val activeExercises = mutableStateOf<List<PlannedExerciseUi>>(emptyList())
 
     private val permissionsLauncher = registerForActivityResult(
         PermissionController.createRequestPermissionResultContract(),
@@ -73,6 +90,7 @@ class MainActivity : ComponentActivity() {
                             onEnroll = ::enroll,
                             onSync = ::syncNow,
                             activeSessionId = activeSessionId.value,
+                            plannedExercises = activeExercises.value,
                             onNextBlock = ::nextBlock,
                             onRecordSession = ::recordSession,
                         )
@@ -151,6 +169,7 @@ class MainActivity : ComponentActivity() {
         durationMinutes: Int,
         rpe: Double?,
         notes: String,
+        exercises: JSONArray,
     ) {
         lifecycleScope.launch {
             statusText.value = "Registrando treino realizado"
@@ -162,6 +181,7 @@ class MainActivity : ComponentActivity() {
                         durationMinutes = durationMinutes,
                         rpe = rpe,
                         notes = notes,
+                        exercises = exercises,
                     )
                     container.repository.fullSync()
                 }
@@ -182,10 +202,22 @@ class MainActivity : ComponentActivity() {
                 val passed = response.getJSONObject("audit").getBoolean("passed")
                 if (passed) {
                     val sessions = response.getJSONObject("plan").getJSONArray("sessions")
-                    activeSessionId.value = if (sessions.length() > 0) {
-                        sessions.getJSONObject(0).getString("session_id")
+                    if (sessions.length() > 0) {
+                        val firstSession = sessions.getJSONObject(0)
+                        activeSessionId.value = firstSession.getString("session_id")
+                        val prescriptions = firstSession.getJSONArray("prescriptions")
+                        activeExercises.value = List(prescriptions.length()) { index ->
+                            val item = prescriptions.getJSONObject(index)
+                            PlannedExerciseUi(
+                                exerciseId = item.getString("exercise_id"),
+                                plannedSets = item.getInt("sets"),
+                                suggestedLoadKg = if (item.isNull("load_kg")) null else item.getDouble("load_kg"),
+                                targetRir = item.getDouble("target_rir"),
+                            )
+                        }
                     } else {
-                        ""
+                        activeSessionId.value = ""
+                        activeExercises.value = emptyList()
                     }
                     statusText.value =
                         "Novo bloco auditado e aprovado (${response.getString("snapshot_id").take(8)}); " +
@@ -205,12 +237,13 @@ private fun Dashboard(
     healthStatus: String,
     operationStatus: String,
     activeSessionId: String,
+    plannedExercises: List<PlannedExerciseUi>,
     onCorePermissions: () -> Unit,
     onExtendedPermissions: () -> Unit,
     onEnroll: (String) -> Unit,
     onSync: () -> Unit,
     onNextBlock: () -> Unit,
-    onRecordSession: (String, Boolean, Int, Double?, String) -> Unit,
+    onRecordSession: (String, Boolean, Int, Double?, String, JSONArray) -> Unit,
 ) {
     var bootstrapToken by remember { mutableStateOf("") }
     var sessionId by remember(activeSessionId) { mutableStateOf(activeSessionId) }
@@ -218,6 +251,18 @@ private fun Dashboard(
     var duration by remember { mutableStateOf("") }
     var rpe by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
+    val exerciseLogs = remember(activeSessionId, plannedExercises) {
+        mutableStateMapOf<String, ExerciseLogValues>().apply {
+            plannedExercises.forEach { exercise ->
+                put(
+                    exercise.exerciseId,
+                    ExerciseLogValues(
+                        loadKg = exercise.suggestedLoadKg?.toString() ?: "",
+                    ),
+                )
+            }
+        }
+    }
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -282,6 +327,49 @@ private fun Dashboard(
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
+        plannedExercises.forEach { exercise ->
+            val values = exerciseLogs[exercise.exerciseId] ?: ExerciseLogValues()
+            Text(
+                "${exercise.exerciseId} — ${exercise.plannedSets} séries; RIR alvo ${exercise.targetRir}",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            OutlinedTextField(
+                value = values.loadKg,
+                onValueChange = { value ->
+                    exerciseLogs[exercise.exerciseId] = values.copy(
+                        loadKg = value.filter { char -> char.isDigit() || char == '.' || char == ',' },
+                    )
+                },
+                label = { Text("Carga kg (vazio para peso corporal)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = values.repsCsv,
+                onValueChange = { value ->
+                    exerciseLogs[exercise.exerciseId] = values.copy(
+                        repsCsv = value.filter { char -> char.isDigit() || char == ',' || char == ' ' },
+                    )
+                },
+                label = { Text("Repetições por série, ex.: 12,12,10") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = values.rirCsv,
+                onValueChange = { value ->
+                    exerciseLogs[exercise.exerciseId] = values.copy(
+                        rirCsv = value.filter { char ->
+                            char.isDigit() || char == ',' || char == '.' || char == ' '
+                        },
+                    )
+                },
+                label = { Text("RIR por série, ex.: 3,2,2") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
         OutlinedTextField(
             value = notes,
             onValueChange = { if (it.length <= 5000) notes = it },
@@ -297,7 +385,31 @@ private fun Dashboard(
                     parsedDuration != null &&
                     (parsedRpe == null || parsedRpe in 0.0..10.0)
                 ) {
-                    onRecordSession(sessionId, completed, parsedDuration, parsedRpe, notes)
+                    val exercisePayload = JSONArray()
+                    plannedExercises.forEach { exercise ->
+                        val values = exerciseLogs[exercise.exerciseId] ?: ExerciseLogValues()
+                        val reps = values.repsCsv.split(',')
+                            .mapNotNull { item -> item.trim().toIntOrNull() }
+                        val rirs = values.rirCsv.split(',')
+                            .mapNotNull { item -> item.trim().replace(',', '.').toDoubleOrNull() }
+                        val load = values.loadKg.replace(',', '.').toDoubleOrNull()
+                        val sets = JSONArray()
+                        reps.forEachIndexed { index, repetitions ->
+                            sets.put(
+                                JSONObject()
+                                    .put("set_number", index + 1)
+                                    .put("reps", repetitions)
+                                    .put("load_kg", load ?: JSONObject.NULL)
+                                    .put("rir", rirs.getOrNull(index) ?: JSONObject.NULL),
+                            )
+                        }
+                        exercisePayload.put(
+                            JSONObject()
+                                .put("exercise_id", exercise.exerciseId)
+                                .put("sets", sets),
+                        )
+                    }
+                    onRecordSession(sessionId, completed, parsedDuration, parsedRpe, notes, exercisePayload)
                     duration = ""
                     rpe = ""
                     notes = ""
