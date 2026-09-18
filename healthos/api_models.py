@@ -122,6 +122,7 @@ class TrainingEnvironmentIn(StrictModel):
     noise_limit: str = "moderate"
     surface: str = "indoor"
     available_minutes: int = Field(ge=15, le=240)
+    load_options_kg: list[float] = Field(default_factory=list, max_length=200)
 
 
 class ReadinessIn(StrictModel):
