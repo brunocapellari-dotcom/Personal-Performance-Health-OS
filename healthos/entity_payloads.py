@@ -34,6 +34,15 @@ class TrainingEnvironmentPayload(EntityPayload):
     noise_limit: Literal["low", "moderate", "high"] = "moderate"
     surface: str = Field(default="indoor", min_length=1, max_length=128)
     available_minutes: int = Field(ge=15, le=240)
+    load_options_kg: list[float] = Field(default_factory=list, max_length=200)
+
+    @model_validator(mode="after")
+    def validate_load_options(self) -> "TrainingEnvironmentPayload":
+        if any(value <= 0 or value > 5000 for value in self.load_options_kg):
+            raise ValueError("load_options_kg must contain positive realistic loads")
+        if len(set(self.load_options_kg)) != len(self.load_options_kg):
+            raise ValueError("load_options_kg cannot contain duplicates")
+        return self
 
 
 class ReadinessPayload(EntityPayload):
