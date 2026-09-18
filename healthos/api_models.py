@@ -173,13 +173,13 @@ class EventIn(StrictModel):
 
 
 class NextBlockRequest(StrictModel):
-    goals: list[GoalIn] = Field(min_length=1, max_length=20)
-    environment: TrainingEnvironmentIn
-    readiness: ReadinessIn
+    goals: list[GoalIn] | None = Field(default=None, min_length=1, max_length=20)
+    environment: TrainingEnvironmentIn | None = None
+    readiness: ReadinessIn | None = None
     nutrition_trend: NutritionTrendIn | None = None
     event: EventIn | None = None
     training_response: TrainingResponseIn | None = None
-    availability: list[AvailabilityWindowIn] = Field(default_factory=list, max_length=84)
+    availability: list[AvailabilityWindowIn] | None = Field(default=None, max_length=84)
     today: date
     weeks: int = Field(default=4, ge=1, le=12)
 
