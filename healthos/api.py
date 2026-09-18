@@ -31,7 +31,7 @@ from .api_models import (
 from .audit import append_audit, verify_audit_chain
 from .auth import (
     Principal,
-    authenticate_token,
+    authenticate_active_token,
     create_challenge,
     enroll_device,
     public_key_fingerprint,
@@ -86,11 +86,18 @@ def create_app(
 
     DbSession = Annotated[Session, Depends(get_session)]
 
-    def get_principal(authorization: Annotated[str | None, Header()] = None) -> Principal:
+    def get_principal(
+        db: DbSession,
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> Principal:
         if not authorization or not authorization.startswith("Bearer "):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="bearer token required")
         try:
-            return authenticate_token(authorization.removeprefix("Bearer ").strip(), resolved_settings)
+            return authenticate_active_token(
+                db,
+                authorization.removeprefix("Bearer ").strip(),
+                resolved_settings,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 
