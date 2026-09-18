@@ -98,8 +98,8 @@ class HealthConnectGateway private constructor(
 
     override suspend fun backfill(
         type: TrackedHealthType,
-        start: Instant = Instant.EPOCH,
-        end: Instant = Instant.now(),
+        start: Instant,
+        end: Instant,
     ): List<HealthDelta> = when (type) {
         TrackedHealthType.STEPS -> readAll(StepsRecord::class, start, end).map { normalize(type, it) }
         TrackedHealthType.HEART_RATE -> readAll(HeartRateRecord::class, start, end).map { normalize(type, it) }
