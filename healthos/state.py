@@ -7,7 +7,7 @@ from typing import TypeVar
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .analytics import TrainingHistoryEngine
+from .analytics import StrengthHistoryEngine, TrainingHistoryEngine
 from .domain import (
     AvailabilityWindow,
     Environment,
@@ -21,6 +21,7 @@ from .domain import (
     Phase,
     ReadinessInput,
     SessionPlan,
+    StrengthProgression,
     TrainingEnvironment,
     TrainingResponse,
 )
@@ -49,6 +50,7 @@ class ResolvedPlanningState:
     event: Event | None
     training_response: TrainingResponse | None
     availability: tuple[AvailabilityWindow, ...]
+    strength_progressions: dict[str, StrengthProgression]
 
 
 class PlanningStateResolver:
@@ -78,6 +80,7 @@ class PlanningStateResolver:
             event=self.event(db, today),
             training_response=self.training_response(db),
             availability=self.availability(db, today, weeks),
+            strength_progressions=self.strength_progressions(db, environment),
         )
 
     def _active(self, db: Session, entity_type: str) -> tuple[EntityRecordModel, ...]:
@@ -218,13 +221,66 @@ class PlanningStateResolver:
             load_ratio=payload.load_ratio,
         )
 
-    def _derive_training_response(self, db: Session) -> TrainingResponse | None:
-        snapshot = db.scalar(select(PlanSnapshotModel).order_by(PlanSnapshotModel.created_at.desc()).limit(1))
+    def strength_progressions(
+        self,
+        db: Session,
+        environment: TrainingEnvironment,
+    ) -> dict[str, StrengthProgression]:
+        snapshot = self._latest_plan_snapshot(db)
         if snapshot is None:
-            return None
+            return {}
         raw_sessions = snapshot.plan_json.get("sessions")
-        if not isinstance(raw_sessions, list) or not raw_sessions:
+        if not isinstance(raw_sessions, list):
+            return {}
+
+        targets: dict[str, tuple[tuple[int, int], float]] = {}
+        for raw_session in raw_sessions:
+            if not isinstance(raw_session, dict):
+                continue
+            prescriptions = raw_session.get("prescriptions", [])
+            if not isinstance(prescriptions, list):
+                continue
+            for prescription in prescriptions:
+                if not isinstance(prescription, dict):
+                    continue
+                exercise_id = prescription.get("exercise_id")
+                rep_range = prescription.get("rep_range")
+                target_rir = prescription.get("target_rir")
+                if (
+                    isinstance(exercise_id, str)
+                    and isinstance(rep_range, list)
+                    and len(rep_range) == 2
+                    and all(isinstance(value, int) for value in rep_range)
+                    and isinstance(target_rir, (int, float))
+                ):
+                    targets[exercise_id] = ((int(rep_range[0]), int(rep_range[1])), float(target_rir))
+        if not targets:
+            return {}
+        return StrengthHistoryEngine().recommend(
+            targets,
+            self._performed_sessions(db),
+            environment.load_options_kg,
+        )
+
+    def _derive_training_response(self, db: Session) -> TrainingResponse | None:
+        planned = self._planned_sessions(db)
+        if not planned:
             return None
+        performed = self._performed_sessions(db)
+        if not performed:
+            return None
+        return TrainingHistoryEngine().summarize(planned, performed)
+
+    def _latest_plan_snapshot(self, db: Session) -> PlanSnapshotModel | None:
+        return db.scalar(select(PlanSnapshotModel).order_by(PlanSnapshotModel.created_at.desc()).limit(1))
+
+    def _planned_sessions(self, db: Session) -> tuple[SessionPlan, ...]:
+        snapshot = self._latest_plan_snapshot(db)
+        if snapshot is None:
+            return ()
+        raw_sessions = snapshot.plan_json.get("sessions")
+        if not isinstance(raw_sessions, list):
+            return ()
 
         planned: list[SessionPlan] = []
         for raw in raw_sessions:
@@ -244,9 +300,9 @@ class PlanningStateResolver:
                 )
             except (KeyError, TypeError, ValueError):
                 continue
-        if not planned:
-            return None
+        return tuple(planned)
 
+    def _performed_sessions(self, db: Session) -> tuple[PerformedSession, ...]:
         performed: list[PerformedSession] = []
         for row in self._active(db, "performed_session"):
             payload = PerformedSessionPayload.model_validate(row.payload)
@@ -282,7 +338,5 @@ class PlanningStateResolver:
                     exercises=exercises,
                 )
             )
+        return tuple(performed)
 
-        if not performed:
-            return None
-        return TrainingHistoryEngine().summarize(tuple(planned), tuple(performed))
