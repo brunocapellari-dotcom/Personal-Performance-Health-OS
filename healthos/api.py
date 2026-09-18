@@ -43,7 +43,7 @@ from .auth import (
 from .config import Settings
 from .contracts import NutritionDataProvider, PackagedFoodProvider
 from .db import Database
-from .domain import Event, Goal, NutritionTrend, ReadinessInput, TrainingEnvironment
+from .domain import AvailabilityWindow, Event, Goal, NutritionTrend, ReadinessInput, TrainingEnvironment, TrainingResponse
 from .models import PlanSnapshotModel
 from .nutrition_sources import OpenFoodFactsProvider, UsdaFoodDataCentralProvider
 from .orchestrator import HealthOS
@@ -292,6 +292,7 @@ def create_app(
                     target_date=goal.target_date,
                     metric=goal.metric,
                     constraints=tuple(goal.constraints),
+                    current=goal.current,
                 )
                 for goal in payload.goals
             ),
@@ -321,6 +322,13 @@ def create_app(
             ),
             today=payload.today,
             weeks=payload.weeks,
+            training_response=(
+                TrainingResponse(**payload.training_response.model_dump()) if payload.training_response else None
+            ),
+            availability=tuple(
+                AvailabilityWindow(day=window.day, available_minutes=window.available_minutes)
+                for window in payload.availability
+            ),
         )
         plan_json = jsonable_encoder(asdict(result.plan))
         audit_json = jsonable_encoder(asdict(result.audit))
