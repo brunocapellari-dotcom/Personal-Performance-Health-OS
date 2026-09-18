@@ -18,6 +18,8 @@ class NextBlockCoordinator(
         val readiness = database.remoteEntityDao().activeByType("readiness").firstOrNull()
         val nutrition = database.remoteEntityDao().activeByType("nutrition_trend").firstOrNull()
         val event = database.remoteEntityDao().activeByType("event").firstOrNull()
+        val trainingResponse = database.remoteEntityDao().activeByType("training_response").firstOrNull()
+        val availability = database.remoteEntityDao().activeByType("calendar_availability")
 
         require(goals.isNotEmpty()) { "At least one active goal is required" }
         require(environment != null) { "Training environment is required" }
@@ -29,6 +31,14 @@ class NextBlockCoordinator(
             .put("readiness", JSONObject(readiness.payloadJson))
             .put("nutrition_trend", nutrition?.let { JSONObject(it.payloadJson) } ?: JSONObject.NULL)
             .put("event", event?.let { JSONObject(it.payloadJson) } ?: JSONObject.NULL)
+            .put(
+                "training_response",
+                trainingResponse?.let { JSONObject(it.payloadJson) } ?: JSONObject.NULL,
+            )
+            .put(
+                "availability",
+                JSONArray().apply { availability.forEach { put(JSONObject(it.payloadJson)) } },
+            )
             .put("today", LocalDate.now().toString())
             .put("weeks", weeks)
 
