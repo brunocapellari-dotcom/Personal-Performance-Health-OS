@@ -54,6 +54,7 @@ def test_canonical_state_resolves_assessment_calendar_and_performed_history() ->
                 "noise_limit": "moderate",
                 "surface": "indoor",
                 "available_minutes": 60,
+                "load_options_kg": [16.0, 20.0, 22.0, 24.0],
             },
         ),
         IncomingChange(
@@ -122,8 +123,9 @@ def test_canonical_state_resolves_assessment_calendar_and_performed_history() ->
                     {
                         "exercise_id": "goblet_squat",
                         "sets": [
-                            {"set_number": 1, "reps": 10, "load_kg": 20, "rir": 3},
-                            {"set_number": 2, "reps": 10, "load_kg": 20, "rir": 2},
+                            {"set_number": 1, "reps": 12, "load_kg": 20, "rir": 3},
+                            {"set_number": 2, "reps": 12, "load_kg": 20, "rir": 2},
+                            {"set_number": 3, "reps": 12, "load_kg": 20, "rir": 2},
                         ],
                     }
                 ],
@@ -148,6 +150,16 @@ def test_canonical_state_resolves_assessment_calendar_and_performed_history() ->
                             "focus": "strength",
                             "phase": "accumulation",
                             "duration_minutes": 60,
+                            "prescriptions": [
+                                {
+                                    "exercise_id": "goblet_squat",
+                                    "sets": 3,
+                                    "rep_range": [8, 12],
+                                    "target_rir": 2.0,
+                                    "load_kg": 20.0,
+                                    "rest_seconds": 120,
+                                }
+                            ],
                         },
                         {
                             "session_id": "w1-conditioning",
@@ -175,3 +187,5 @@ def test_canonical_state_resolves_assessment_calendar_and_performed_history() ->
     assert state.training_response.sessions_completed == 1
     assert state.training_response.avg_rpe == 7.0
     assert state.training_response.load_ratio == 0.5
+    assert state.strength_progressions["goblet_squat"].next_load_kg == 22.0
+    assert state.strength_progressions["goblet_squat"].rationale == "double_progression_increment"
