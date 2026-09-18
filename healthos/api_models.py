@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .domain import Environment
 
@@ -107,6 +107,7 @@ class GoalIn(StrictModel):
     description: str
     priority: int = Field(ge=1, le=5)
     baseline: float | None = None
+    current: float | None = None
     target: float | None = None
     target_date: date | None = None
     metric: str
@@ -143,6 +144,24 @@ class NutritionTrendIn(StrictModel):
     current_tdee_estimate_kcal: float = Field(gt=0)
 
 
+class TrainingResponseIn(StrictModel):
+    sessions_planned: int = Field(ge=0, le=100)
+    sessions_completed: int = Field(ge=0, le=100)
+    avg_rpe: float | None = Field(default=None, ge=0, le=10)
+    load_ratio: float | None = Field(default=None, ge=0, le=5)
+
+    @model_validator(mode="after")
+    def completed_cannot_exceed_planned(self) -> "TrainingResponseIn":
+        if self.sessions_completed > self.sessions_planned:
+            raise ValueError("sessions_completed cannot exceed sessions_planned")
+        return self
+
+
+class AvailabilityWindowIn(StrictModel):
+    day: date
+    available_minutes: int = Field(ge=15, le=240)
+
+
 class EventIn(StrictModel):
     event_id: str
     name: str
@@ -159,6 +178,8 @@ class NextBlockRequest(StrictModel):
     readiness: ReadinessIn
     nutrition_trend: NutritionTrendIn | None = None
     event: EventIn | None = None
+    training_response: TrainingResponseIn | None = None
+    availability: list[AvailabilityWindowIn] = Field(default_factory=list, max_length=84)
     today: date
     weeks: int = Field(default=4, ge=1, le=12)
 
