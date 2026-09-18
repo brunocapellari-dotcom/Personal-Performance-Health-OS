@@ -43,7 +43,15 @@ from .auth import (
 from .config import Settings
 from .contracts import NutritionDataProvider, PackagedFoodProvider
 from .db import Database
-from .domain import AvailabilityWindow, Event, Goal, NutritionTrend, ReadinessInput, TrainingEnvironment, TrainingResponse
+from .domain import (
+    AvailabilityWindow,
+    Event,
+    Goal,
+    NutritionTrend,
+    ReadinessInput,
+    TrainingEnvironment,
+    TrainingResponse,
+)
 from .models import PlanSnapshotModel
 from .nutrition_sources import OpenFoodFactsProvider, UsdaFoodDataCentralProvider
 from .orchestrator import HealthOS
