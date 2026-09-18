@@ -14,11 +14,11 @@ import jwt
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .config import Settings
-from .models import AuthChallengeModel, DeviceModel
+from .models import AuthChallengeModel, DeviceModel, PairingTokenModel
 
 
 @dataclass(frozen=True)
@@ -54,6 +54,55 @@ def enroll_device(db: Session, *, device_id: str, public_key_pem: str, role: str
     db.add(device)
     db.flush()
     return device
+
+
+def enrolled_device_count(db: Session) -> int:
+    return int(db.scalar(select(func.count()).select_from(DeviceModel)) or 0)
+
+
+def create_pairing_token(
+    db: Session,
+    *,
+    issued_by_device_id: str,
+    role: str,
+    ttl_seconds: int = 300,
+) -> tuple[str, datetime]:
+    if role not in {"owner_device", "readonly"}:
+        raise ValueError("unsupported role")
+    if ttl_seconds < 30 or ttl_seconds > 900:
+        raise ValueError("pairing token TTL must be between 30 and 900 seconds")
+    issuer = active_device(db, issued_by_device_id)
+    if issuer is None or issuer.role != "owner_device":
+        raise PermissionError("active owner device required")
+    token = secrets.token_urlsafe(48)
+    expires_at = datetime.now(UTC) + timedelta(seconds=ttl_seconds)
+    db.add(
+        PairingTokenModel(
+            token_hash=_secret_hash(token),
+            issued_by_device_id=issued_by_device_id,
+            role=role,
+            expires_at=expires_at,
+        )
+    )
+    db.flush()
+    return token, expires_at
+
+
+def consume_pairing_token(db: Session, *, token: str, requested_role: str) -> PairingTokenModel:
+    record = db.get(PairingTokenModel, _secret_hash(token))
+    now = datetime.now(UTC)
+    if record is None:
+        raise ValueError("pairing token not found")
+    if record.used_at is not None or _as_utc(record.expires_at) < now:
+        raise ValueError("pairing token expired or already used")
+    if record.role != requested_role:
+        raise ValueError("pairing token role does not match requested role")
+    issuer = active_device(db, record.issued_by_device_id)
+    if issuer is None or issuer.role != "owner_device":
+        raise ValueError("pairing token issuer is no longer an active owner")
+    record.used_at = now
+    db.flush()
+    return record
 
 
 def create_challenge(db: Session, *, device_id: str, settings: Settings) -> AuthChallengeModel:
@@ -168,6 +217,10 @@ def public_key_fingerprint(public_key_pem: str) -> str:
     public_key = _load_ec_public_key(public_key_pem)
     der = public_key.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
     return hashlib.sha256(der).hexdigest()
+
+
+def _secret_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def _load_ec_public_key(public_key_pem: str) -> ec.EllipticCurvePublicKey:
