@@ -153,12 +153,14 @@ class TrainingResponseEngine:
     """Convert recent execution into conservative deterministic planning adjustments."""
 
     def evaluate(self, response: TrainingResponse | None) -> TrainingResponseDecision:
-        if response is None or response.sessions_planned == 0:
+        if response is None:
             return TrainingResponseDecision(1.0, 1.0, 3, ("no_recent_response_constraint",))
         if response.sessions_planned < 0 or response.sessions_completed < 0:
             raise ValueError("session counts cannot be negative")
         if response.sessions_completed > response.sessions_planned:
             raise ValueError("completed sessions cannot exceed planned sessions")
+        if response.sessions_planned == 0:
+            return TrainingResponseDecision(1.0, 1.0, 3, ("no_recent_response_constraint",))
         if response.avg_rpe is not None and not 0 <= response.avg_rpe <= 10:
             raise ValueError("avg_rpe must be between 0 and 10")
         if response.load_ratio is not None and response.load_ratio < 0:
