@@ -45,7 +45,16 @@ def test_backup_restore_roundtrip_preserves_state_and_audit_chain() -> None:
                     entity_id="goal-strength",
                     logical_clock=1,
                     deleted=False,
-                    payload={"description": "synthetic strength goal", "priority": 1},
+                    payload={
+                        "goal_id": "goal-strength",
+                        "description": "synthetic strength goal",
+                        "priority": 1,
+                        "baseline": 1.0,
+                        "current": 1.2,
+                        "target": 2.0,
+                        "metric": "strength",
+                        "constraints": [],
+                    },
                 ),
             ),
         )
