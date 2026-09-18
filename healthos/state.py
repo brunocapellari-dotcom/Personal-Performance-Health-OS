@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
-from typing import TypeVar
-
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -37,8 +35,6 @@ from .entity_payloads import (
     TrainingResponsePayload,
 )
 from .models import EntityRecordModel, PlanSnapshotModel
-
-T = TypeVar("T")
 
 
 @dataclass(frozen=True)
