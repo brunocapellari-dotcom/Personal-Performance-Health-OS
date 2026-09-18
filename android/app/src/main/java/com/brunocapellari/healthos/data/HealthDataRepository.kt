@@ -9,7 +9,28 @@ import com.brunocapellari.healthos.security.DeviceIdentity
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
+import java.time.Duration
+import java.time.Instant
 
+
+enum class HealthIngestionMode {
+    FOREGROUND,
+    BACKGROUND,
+}
+
+data class HealthBackfillPolicy(
+    val windowDays: Long = 90,
+    val recoveryMinimumDays: Long = 30,
+    val historyDaysByType: Map<TrackedHealthType, Long> = mapOf(
+        TrackedHealthType.HEART_RATE to 90,
+        TrackedHealthType.STEPS to 90,
+        TrackedHealthType.DISTANCE to 90,
+        TrackedHealthType.TOTAL_CALORIES to 90,
+        TrackedHealthType.SLEEP to 365,
+        TrackedHealthType.EXERCISE to 365,
+        TrackedHealthType.WEIGHT to 1825,
+    ),
+)
 
 data class SyncSummary(
     val healthEventsStaged: Int,
@@ -25,13 +46,16 @@ class HealthDataRepository(
     private val healthConnect: HealthConnectGateway,
     private val api: HealthOsApiClient,
     private val identity: DeviceIdentity,
+    private val backfillPolicy: HealthBackfillPolicy = HealthBackfillPolicy(),
 ) {
     suspend fun enroll(bootstrapToken: String) {
         api.enroll(bootstrapToken, identity)
     }
 
-    suspend fun fullSync(): SyncSummary {
-        val canIngestHealth = healthConnect.hasPermissions(healthConnect.extendedReadPermissions())
+    suspend fun fullSync(mode: HealthIngestionMode = HealthIngestionMode.FOREGROUND): SyncSummary {
+        val hasCoreRead = healthConnect.hasCoreReadPermissions()
+        val backgroundAllowed = mode != HealthIngestionMode.BACKGROUND || healthConnect.hasBackgroundReadPermission()
+        val canIngestHealth = hasCoreRead && backgroundAllowed
         val staged = if (canIngestHealth) ingestHealthConnect() else 0
         val network = syncBackend()
         return network.copy(
@@ -41,8 +65,8 @@ class HealthDataRepository(
     }
 
     suspend fun ingestHealthConnect(): Int {
-        if (!healthConnect.hasPermissions(healthConnect.extendedReadPermissions())) {
-            throw IllegalStateException("Health Connect permissions are incomplete")
+        if (!healthConnect.hasCoreReadPermissions()) {
+            throw IllegalStateException("Health Connect core read permissions are incomplete")
         }
         var staged = 0
         for (type in TrackedHealthType.entries) {
@@ -60,17 +84,19 @@ class HealthDataRepository(
         val state = database.syncStateDao().get(stateKey)
         var token = state?.value
         var staged = 0
+        val now = Instant.now()
+        val canReadHistory = healthConnect.hasHistoryReadPermission()
 
         if (token == null) {
             token = healthConnect.newToken(type)
-            staged += stageDeltas(healthConnect.backfill(type))
+            staged += backfillWindowed(type, initialBackfillStart(type, now, canReadHistory), now)
         }
 
         val batch = try {
             healthConnect.drain(type, token)
         } catch (_: HealthConnectTokenExpiredException) {
             token = healthConnect.newToken(type)
-            staged += stageDeltas(healthConnect.backfill(type))
+            staged += backfillWindowed(type, recoveryBackfillStart(type, now, canReadHistory), now)
             healthConnect.drain(type, token)
         }
         staged += stageDeltas(batch.deltas)
@@ -81,6 +107,40 @@ class HealthDataRepository(
                 updatedAtEpochMillis = System.currentTimeMillis(),
             ),
         )
+        return staged
+    }
+
+    private fun initialBackfillStart(type: TrackedHealthType, now: Instant, canReadHistory: Boolean): Instant {
+        val days = if (canReadHistory) {
+            backfillPolicy.historyDaysByType[type] ?: backfillPolicy.recoveryMinimumDays
+        } else {
+            backfillPolicy.recoveryMinimumDays
+        }
+        return now.minus(Duration.ofDays(days))
+    }
+
+    private suspend fun recoveryBackfillStart(
+        type: TrackedHealthType,
+        now: Instant,
+        canReadHistory: Boolean,
+    ): Instant {
+        val minimumStart = now.minus(Duration.ofDays(backfillPolicy.recoveryMinimumDays))
+        if (!canReadHistory) return minimumStart
+        val latestMillis = database.observationDao().latestObservedAt(type.wireName) ?: return minimumStart
+        val latest = Instant.ofEpochMilli(latestMillis)
+        return if (latest.isBefore(minimumStart)) latest else minimumStart
+    }
+
+    private suspend fun backfillWindowed(type: TrackedHealthType, start: Instant, end: Instant): Int {
+        require(!start.isAfter(end)) { "Health Connect backfill start must not be after end" }
+        var cursor = start
+        var staged = 0
+        val window = Duration.ofDays(backfillPolicy.windowDays.coerceAtLeast(1))
+        while (cursor.isBefore(end)) {
+            val next = minOf(cursor.plus(window), end)
+            staged += stageDeltas(healthConnect.backfill(type, cursor, next))
+            cursor = next
+        }
         return staged
     }
 
