@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -31,6 +32,7 @@ import kotlinx.coroutines.withContext
 class MainActivity : ComponentActivity() {
     private val statusText = mutableStateOf("Inicializando")
     private val healthText = mutableStateOf("Health Connect não verificado")
+    private val activeSessionId = mutableStateOf("")
 
     private val permissionsLauncher = registerForActivityResult(
         PermissionController.createRequestPermissionResultContract(),
@@ -65,7 +67,9 @@ class MainActivity : ComponentActivity() {
                             },
                             onEnroll = ::enroll,
                             onSync = ::syncNow,
+                            activeSessionId = activeSessionId.value,
                             onNextBlock = ::nextBlock,
+                            onRecordSession = ::recordSession,
                         )
                     }
                 }
