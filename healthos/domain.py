@@ -47,6 +47,7 @@ class Goal:
     metric: str
     constraints: tuple[str, ...] = ()
     status: GoalStatus = GoalStatus.DEVELOP
+    current: float | None = None
 
 
 @dataclass(frozen=True)
@@ -102,6 +103,20 @@ class ReadinessDecision:
     score: float
     action: str
     reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class TrainingResponse:
+    sessions_planned: int
+    sessions_completed: int
+    avg_rpe: float | None = None
+    load_ratio: float | None = None
+
+
+@dataclass(frozen=True)
+class AvailabilityWindow:
+    day: date
+    available_minutes: int
 
 
 @dataclass(frozen=True)
@@ -184,6 +199,7 @@ class SessionPlan:
     prescriptions: tuple[ExercisePrescription, ...]
     conditioning: ConditioningPrescription | None = None
     notes: tuple[str, ...] = ()
+    scheduled_date: date | None = None
 
     @property
     def exercises(self) -> tuple[str, ...]:
