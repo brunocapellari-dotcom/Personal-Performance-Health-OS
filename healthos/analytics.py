@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from statistics import mean
 
-from .domain import Observation, PerformedSession, SessionPlan
+from .domain import Observation, PerformedSession, SessionPlan, TrainingResponse
 
 
 @dataclass(frozen=True)
@@ -131,6 +131,47 @@ class PlannedVsPerformedEngine:
         else:
             status = "AS_PLANNED"
         return SessionResponse(round(adherence, 3), round(duration_ratio, 3), session_load, status)
+
+
+class TrainingHistoryEngine:
+    """Summarize raw performed sessions into deterministic planning response features."""
+
+    def summarize(
+        self,
+        planned: tuple[SessionPlan, ...],
+        performed: tuple[PerformedSession, ...],
+    ) -> TrainingResponse:
+        planned_by_id = {session.session_id: session for session in planned}
+        performed_by_id: dict[str, PerformedSession] = {}
+        for session in performed:
+            if session.planned_session_id not in planned_by_id:
+                continue
+            existing = performed_by_id.get(session.planned_session_id)
+            if existing is None:
+                performed_by_id[session.planned_session_id] = session
+                continue
+            existing_time = existing.performed_at or datetime.min
+            candidate_time = session.performed_at or datetime.min
+            if candidate_time >= existing_time:
+                performed_by_id[session.planned_session_id] = session
+
+        relevant_planned = tuple(planned_by_id.values())
+        relevant_performed = tuple(performed_by_id.values())
+        completed = tuple(session for session in relevant_performed if session.completed)
+        rpes = tuple(session.rpe for session in completed if session.rpe is not None)
+
+        planned_minutes = sum(session.duration_minutes for session in relevant_planned)
+        performed_minutes = sum(max(0, session.duration_minutes) for session in relevant_performed)
+        load_ratio = None
+        if planned_minutes > 0:
+            load_ratio = round(performed_minutes / planned_minutes, 3)
+
+        return TrainingResponse(
+            sessions_planned=len(relevant_planned),
+            sessions_completed=len(completed),
+            avg_rpe=None if not rpes else round(mean(rpes), 2),
+            load_ratio=load_ratio,
+        )
 
 
 @dataclass(frozen=True)
