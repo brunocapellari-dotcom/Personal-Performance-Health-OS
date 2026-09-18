@@ -50,7 +50,16 @@ data class ChangeBatch(
 
 class HealthConnectTokenExpiredException : IllegalStateException("Health Connect changes token expired")
 
-class HealthConnectGateway(private val context: Context) {
+interface HealthConnectPort {
+    override suspend fun hasCoreReadPermissions(): Boolean
+    override suspend fun hasBackgroundReadPermission(): Boolean
+    override suspend fun hasHistoryReadPermission(): Boolean
+    override suspend fun newToken(type: TrackedHealthType): String
+    suspend fun backfill(type: TrackedHealthType, start: Instant, end: Instant): List<HealthDelta>
+    override suspend fun drain(type: TrackedHealthType, token: String): ChangeBatch
+}
+
+class HealthConnectGateway(private val context: Context) : HealthConnectPort {
     private val client: HealthConnectClient by lazy { HealthConnectClient.getOrCreate(context) }
 
     fun sdkStatus(): Int = HealthConnectClient.getSdkStatus(context)
@@ -82,7 +91,7 @@ class HealthConnectGateway(private val context: Context) {
         ChangesTokenRequest(recordTypes = setOf(type.recordClass)),
     )
 
-    suspend fun backfill(
+    override suspend fun backfill(
         type: TrackedHealthType,
         start: Instant = Instant.EPOCH,
         end: Instant = Instant.now(),
