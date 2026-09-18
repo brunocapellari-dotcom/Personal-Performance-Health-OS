@@ -59,6 +59,7 @@ class TrainingEnvironment:
     noise_limit: str = "moderate"
     surface: str = "indoor"
     available_minutes: int = 60
+    load_options_kg: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True)
