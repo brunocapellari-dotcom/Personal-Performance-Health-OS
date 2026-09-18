@@ -51,6 +51,6 @@ class AppContainer(application: Application) {
         HealthDataRepository(database, healthConnect, api, identity)
     }
     val nextBlock: NextBlockCoordinator by lazy {
-        NextBlockCoordinator(database, api, identity)
+        NextBlockCoordinator(repository, api, identity)
     }
 }
