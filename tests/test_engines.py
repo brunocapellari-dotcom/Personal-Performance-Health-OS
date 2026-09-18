@@ -9,6 +9,7 @@ from healthos.domain import (
     ReadinessInput,
     StrengthPerformance,
     TrainingEnvironment,
+    TrainingResponse,
 )
 from healthos.engines import (
     AdaptiveNutritionEngine,
@@ -16,6 +17,7 @@ from healthos.engines import (
     MissedWorkoutEngine,
     ReadinessEngine,
     StrengthEngine,
+    TrainingResponseEngine,
 )
 from healthos.exercise_db import ExerciseSelector
 
@@ -103,3 +105,49 @@ def test_exercise_selector_respects_fixation_points() -> None:
     selector = ExerciseSelector()
     assert not selector.eligible(without_anchor, "anti-rotation")
     assert selector.eligible(with_anchor, "anti-rotation")[0].exercise_id == "band_pallof_press"
+
+
+def test_goal_gap_uses_current_progress_when_available() -> None:
+    from healthos.engines import GoalGapEngine
+
+    goal = Goal(
+        "progress",
+        "Synthetic progress goal",
+        4,
+        10.0,
+        40.0,
+        None,
+        "distance_km",
+        current=25.0,
+    )
+    gap = GoalGapEngine().calculate((goal,))["progress"]
+    assert gap.absolute_gap == 15.0
+    assert gap.relative_gap_pct == 60.0
+
+
+def test_recent_low_adherence_reduces_frequency_and_volume() -> None:
+    decision = TrainingResponseEngine().evaluate(
+        TrainingResponse(
+            sessions_planned=6,
+            sessions_completed=2,
+            avg_rpe=7.5,
+            load_ratio=0.7,
+        )
+    )
+    assert decision.target_sessions_per_week == 2
+    assert decision.volume_modifier == 0.8
+    assert "low_adherence" in decision.reasons
+
+
+def test_recent_high_rpe_caps_frequency_even_with_good_adherence() -> None:
+    decision = TrainingResponseEngine().evaluate(
+        TrainingResponse(
+            sessions_planned=6,
+            sessions_completed=6,
+            avg_rpe=9.2,
+            load_ratio=1.0,
+        )
+    )
+    assert decision.target_sessions_per_week == 2
+    assert decision.volume_modifier == 0.85
+    assert "high_recent_rpe" in decision.reasons
