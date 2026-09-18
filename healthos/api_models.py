@@ -24,6 +24,17 @@ class DeviceEnrollResponse(StrictModel):
     fingerprint: str
 
 
+class PairingTokenRequest(StrictModel):
+    role: Literal["owner_device", "readonly"] = "readonly"
+    ttl_seconds: int = Field(default=300, ge=30, le=900)
+
+
+class PairingTokenResponse(StrictModel):
+    token: str
+    role: str
+    expires_at: datetime
+
+
 class ChallengeRequest(StrictModel):
     device_id: str = Field(min_length=3, max_length=128)
 
