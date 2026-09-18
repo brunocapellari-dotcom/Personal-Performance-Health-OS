@@ -18,13 +18,26 @@ def _settings() -> Settings:
     )
 
 
+def _goal_payload(goal_id: str, target: float) -> dict[str, object]:
+    return {
+        "goal_id": goal_id,
+        "description": "Synthetic goal",
+        "priority": 3,
+        "baseline": 5.0,
+        "current": 6.0,
+        "target": target,
+        "metric": "synthetic_metric",
+        "constraints": [],
+    }
+
+
 def test_sync_is_idempotent_and_deterministic() -> None:
     settings = _settings()
     database = Database(settings)
     database.create_schema_for_tests(settings)
-    first = IncomingChange("change-0001", "goal", "goal-1", 1, False, {"target": 10})
-    stale = IncomingChange("change-0002", "goal", "goal-1", 1, False, {"target": 11})
-    newer = IncomingChange("change-0003", "goal", "goal-1", 2, False, {"target": 12})
+    first = IncomingChange("change-0001", "goal", "goal-1", 1, False, _goal_payload("goal-1", 10))
+    stale = IncomingChange("change-0002", "goal", "goal-1", 1, False, _goal_payload("goal-1", 11))
+    newer = IncomingChange("change-0003", "goal", "goal-1", 2, False, _goal_payload("goal-1", 12))
 
     with database.session() as db:
         result = push_changes(db, settings, device_id="phone-b", changes=(first,))
@@ -44,8 +57,22 @@ def test_append_only_health_history_cannot_be_overwritten() -> None:
     settings = _settings()
     database = Database(settings)
     database.create_schema_for_tests(settings)
-    original = IncomingChange("obs-change-1", "observation", "obs-1", 1, False, {"weight": 100})
-    altered = IncomingChange("obs-change-2", "observation", "obs-1", 2, False, {"weight": 90})
+    original = IncomingChange(
+        "obs-change-1",
+        "observation",
+        "obs-1",
+        1,
+        False,
+        {"metric": "weight", "value": 100.0, "unit": "kg"},
+    )
+    altered = IncomingChange(
+        "obs-change-2",
+        "observation",
+        "obs-1",
+        2,
+        False,
+        {"metric": "weight", "value": 90.0, "unit": "kg"},
+    )
     with database.session() as db:
         assert push_changes(db, settings, device_id="phone", changes=(original,)).accepted
         assert push_changes(db, settings, device_id="phone", changes=(altered,)).conflicts == ("obs-change-2",)
@@ -60,7 +87,7 @@ def test_audit_chain_detects_tampering() -> None:
             db,
             settings,
             device_id="phone",
-            changes=(IncomingChange("change-1", "goal", "g", 1, False, {"target": 1}),),
+            changes=(IncomingChange("change-1", "goal", "g", 1, False, _goal_payload("g", 1)),),
         )
         assert verify_audit_chain(db, settings)
         first = db.scalar(select(AuditLogModel).order_by(AuditLogModel.audit_seq.asc()).limit(1))
@@ -68,3 +95,35 @@ def test_audit_chain_detects_tampering() -> None:
         first.entry_hash = "f" * 64
         db.flush()
         assert not verify_audit_chain(db, settings)
+
+
+def test_sync_rejects_unknown_or_malformed_entity_payloads() -> None:
+    settings = _settings()
+    database = Database(settings)
+    database.create_schema_for_tests(settings)
+    with database.session() as db:
+        import pytest
+
+        with pytest.raises(ValueError, match="unsupported entity_type"):
+            push_changes(
+                db,
+                settings,
+                device_id="phone",
+                changes=(IncomingChange("bad-change-1", "mystery", "x", 1, False, {"x": 1}),),
+            )
+        with pytest.raises(ValueError, match="entity_id must match"):
+            push_changes(
+                db,
+                settings,
+                device_id="phone",
+                changes=(
+                    IncomingChange(
+                        "bad-change-2",
+                        "goal",
+                        "goal-a",
+                        1,
+                        False,
+                        _goal_payload("goal-b", 10),
+                    ),
+                ),
+            )
