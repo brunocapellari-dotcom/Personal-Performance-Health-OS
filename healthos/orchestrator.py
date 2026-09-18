@@ -3,7 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
-from .domain import AuditReport, BlockPlan, Event, Goal, NutritionTrend, ReadinessInput, TrainingEnvironment
+from .domain import (
+    AuditReport,
+    AvailabilityWindow,
+    BlockPlan,
+    Event,
+    Goal,
+    NutritionTrend,
+    ReadinessInput,
+    TrainingEnvironment,
+    TrainingResponse,
+)
 from .planner import PerformanceDirector, ProgramAuditor
 
 
@@ -30,6 +40,8 @@ class HealthOS:
         event: Event | None,
         today: date,
         weeks: int = 4,
+        training_response: TrainingResponse | None = None,
+        availability: tuple[AvailabilityWindow, ...] = (),
     ) -> NextBlockResult:
         plan = self.director.build_next_block(
             goals=goals,
@@ -39,6 +51,8 @@ class HealthOS:
             event=event,
             today=today,
             weeks=weeks,
+            training_response=training_response,
+            availability=availability,
         )
         audit = self.auditor.audit(plan, environment)
         return NextBlockResult(plan=plan, audit=audit)
