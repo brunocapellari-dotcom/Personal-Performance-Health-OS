@@ -359,6 +359,7 @@ def create_app(
             if payload.availability is not None
             else resolver.availability(db, payload.today, payload.weeks)
         )
+        strength_progressions = resolver.strength_progressions(db, environment)
 
         resolved_request = jsonable_encoder(
             {
@@ -369,6 +370,10 @@ def create_app(
                 "event": None if event is None else asdict(event),
                 "training_response": None if training_response is None else asdict(training_response),
                 "availability": [asdict(window) for window in availability],
+                "strength_progressions": {
+                    exercise_id: asdict(decision)
+                    for exercise_id, decision in sorted(strength_progressions.items())
+                },
                 "today": payload.today,
                 "weeks": payload.weeks,
             }
@@ -398,6 +403,7 @@ def create_app(
                 weeks=payload.weeks,
                 training_response=training_response,
                 availability=availability,
+                strength_progressions=strength_progressions,
             )
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
