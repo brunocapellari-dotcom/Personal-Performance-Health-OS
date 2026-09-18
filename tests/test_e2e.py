@@ -1,7 +1,16 @@
 from dataclasses import asdict
 from datetime import date, timedelta
 
-from healthos.domain import Environment, Event, Goal, NutritionTrend, ReadinessInput, TrainingEnvironment
+from healthos.domain import (
+    AvailabilityWindow,
+    Environment,
+    Event,
+    Goal,
+    NutritionTrend,
+    ReadinessInput,
+    TrainingEnvironment,
+    TrainingResponse,
+)
 from healthos.orchestrator import HealthOS
 
 
@@ -78,3 +87,63 @@ def test_pain_flag_blocks_normal_training_in_full_plan():
     assert all(s.duration_minutes <= 20 for s in result.plan.sessions)
     assert all(not s.exercises for s in result.plan.sessions)
     assert all(s.conditioning is None for s in result.plan.sessions)
+
+
+def test_calendar_and_recent_response_are_hard_constraints_in_full_plan() -> None:
+    today = date(2027, 3, 1)
+    goals = (
+        Goal(
+            "synthetic-endurance",
+            "Synthetic endurance goal",
+            5,
+            5.0,
+            18.0,
+            today + timedelta(days=60),
+            "walking endurance",
+            current=9.0,
+        ),
+    )
+    env = TrainingEnvironment(
+        Environment.HOME,
+        frozenset({"dumbbells", "band", "step"}),
+        10.0,
+        available_minutes=60,
+    )
+    readiness = ReadinessInput(7.5, 4, 4, 2, 2, 2)
+    response = TrainingResponse(
+        sessions_planned=6,
+        sessions_completed=2,
+        avg_rpe=7.0,
+        load_ratio=0.7,
+    )
+    availability = (
+        AvailabilityWindow(today + timedelta(days=1), 45),
+        AvailabilityWindow(today + timedelta(days=4), 50),
+        AvailabilityWindow(today + timedelta(days=8), 40),
+        AvailabilityWindow(today + timedelta(days=11), 55),
+    )
+
+    result = HealthOS().next_block(
+        goals=goals,
+        environment=env,
+        readiness=readiness,
+        nutrition_trend=None,
+        event=None,
+        today=today,
+        weeks=2,
+        training_response=response,
+        availability=availability,
+    )
+
+    assert result.audit.passed, asdict(result.audit)
+    assert len(result.plan.sessions) == 4
+    allowed_dates = {window.day for window in availability}
+    assert all(session.scheduled_date in allowed_dates for session in result.plan.sessions)
+    assert all(
+        session.duration_minutes
+        <= next(window.available_minutes for window in availability if window.day == session.scheduled_date)
+        for session in result.plan.sessions
+    )
+    assert result.plan.metadata["sessions_per_week"] == {"1": 2, "2": 2}
+    assert result.plan.metadata["volume_modifier"] == 0.8
+    assert result.plan.metadata["goal_gaps"]["synthetic-endurance"]["absolute_gap"] == 9.0
