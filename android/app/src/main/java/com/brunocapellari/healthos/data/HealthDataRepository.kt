@@ -11,6 +11,7 @@ import org.json.JSONObject
 import java.security.MessageDigest
 import java.time.Duration
 import java.time.Instant
+import java.util.UUID
 
 
 enum class HealthIngestionMode {
@@ -101,6 +102,46 @@ class HealthDataRepository(
     suspend fun pendingCount(): Int = database.pendingChangeDao().count()
 
     suspend fun conflictCount(): Int = database.syncConflictDao().count()
+
+    suspend fun recordPerformedSession(
+        plannedSessionId: String,
+        completed: Boolean,
+        durationMinutes: Int,
+        rpe: Double?,
+        notes: String = "",
+        exercises: JSONArray = JSONArray(),
+    ): String {
+        require(plannedSessionId.isNotBlank()) { "plannedSessionId is required" }
+        require(durationMinutes in 0..1440) { "durationMinutes must be between 0 and 1440" }
+        require(rpe == null || rpe in 0.0..10.0) { "RPE must be between 0 and 10" }
+        require(notes.length <= 5000) { "notes exceed 5000 characters" }
+
+        val performedId = UUID.randomUUID().toString()
+        val now = Instant.now()
+        val payload = JSONObject()
+            .put("planned_session_id", plannedSessionId)
+            .put("performed_at", now.toString())
+            .put("completed", completed)
+            .put("duration_minutes", durationMinutes)
+            .put("rpe", rpe ?: JSONObject.NULL)
+            .put("notes", notes)
+            .put("exercises", exercises)
+
+        val fingerprint = "performed_session|$performedId|${payload}"
+        val changeId = sha256(fingerprint)
+        database.pendingChangeDao().insert(
+            PendingChangeEntity(
+                changeId = changeId,
+                entityType = "performed_session",
+                entityId = performedId,
+                logicalClock = now.toEpochMilli().coerceAtLeast(1),
+                deleted = false,
+                payloadJson = payload.toString(),
+                createdAtEpochMillis = now.toEpochMilli(),
+            ),
+        )
+        return performedId
+    }
 
     private suspend fun syncHealthType(type: TrackedHealthType): Int {
         val stateKey = "health_connect_token_${type.wireName}"
