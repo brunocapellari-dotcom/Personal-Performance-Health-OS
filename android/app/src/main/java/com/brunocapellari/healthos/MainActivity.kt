@@ -81,9 +81,9 @@ class MainActivity : ComponentActivity() {
                 return@launch
             }
             val granted = withContext(Dispatchers.IO) {
-                container.healthConnect.hasPermissions(container.healthConnect.extendedReadPermissions())
+                container.healthConnect.hasCoreReadPermissions()
             }
-            healthText.value = if (granted) "Health Connect autorizado" else "Permissões do Health Connect pendentes"
+            healthText.value = if (granted) "Health Connect autorizado para leitura" else "Permissões básicas do Health Connect pendentes"
         }
     }
 
