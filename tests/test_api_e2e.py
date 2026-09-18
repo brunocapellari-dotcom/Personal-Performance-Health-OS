@@ -140,3 +140,106 @@ def test_api_rejects_unauthorized_mutation() -> None:
         },
     )
     assert response.status_code == 401
+
+
+def test_api_next_block_accepts_current_progress_response_and_availability() -> None:
+    client = _client()
+    request = {
+        "goals": [
+            {
+                "goal_id": "adaptive-goal",
+                "description": "Synthetic adaptive goal",
+                "priority": 5,
+                "baseline": 5,
+                "current": 8,
+                "target": 15,
+                "target_date": "2027-05-01",
+                "metric": "distance_km",
+                "constraints": [],
+            }
+        ],
+        "environment": {
+            "environment": "HOME",
+            "equipment": ["dumbbells", "band", "step"],
+            "space_m2": 10,
+            "fixation_points": [],
+            "noise_limit": "moderate",
+            "surface": "indoor",
+            "available_minutes": 60,
+        },
+        "readiness": {
+            "sleep_hours": 7.5,
+            "sleep_quality_1_5": 4,
+            "energy_1_5": 4,
+            "fatigue_1_5": 2,
+            "soreness_1_5": 2,
+            "stress_1_5": 2,
+            "pain_flag": False,
+        },
+        "nutrition_trend": None,
+        "event": None,
+        "training_response": {
+            "sessions_planned": 6,
+            "sessions_completed": 2,
+            "avg_rpe": 7.0,
+            "load_ratio": 0.7,
+        },
+        "availability": [
+            {"day": "2027-03-02", "available_minutes": 45},
+            {"day": "2027-03-05", "available_minutes": 50},
+        ],
+        "today": "2027-03-01",
+        "weeks": 1,
+    }
+    response = client.post("/v1/plans/next-block", headers=_headers(), json=request)
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["audit"]["passed"] is True
+    assert len(payload["plan"]["sessions"]) == 2
+    assert payload["plan"]["metadata"]["goal_gaps"]["adaptive-goal"]["absolute_gap"] == 7.0
+    assert payload["plan"]["metadata"]["sessions_per_week"] == {"1": 2}
+
+
+def test_api_rejects_impossible_training_response() -> None:
+    client = _client()
+    request = {
+        "goals": [
+            {
+                "goal_id": "g",
+                "description": "Synthetic goal",
+                "priority": 1,
+                "baseline": 1,
+                "current": 1,
+                "target": 2,
+                "metric": "strength",
+                "constraints": [],
+            }
+        ],
+        "environment": {
+            "environment": "HOME",
+            "equipment": [],
+            "space_m2": 10,
+            "fixation_points": [],
+            "noise_limit": "low",
+            "surface": "indoor",
+            "available_minutes": 30,
+        },
+        "readiness": {
+            "sleep_hours": 8,
+            "sleep_quality_1_5": 4,
+            "energy_1_5": 4,
+            "fatigue_1_5": 2,
+            "soreness_1_5": 2,
+            "stress_1_5": 2,
+            "pain_flag": False,
+        },
+        "training_response": {
+            "sessions_planned": 1,
+            "sessions_completed": 2,
+        },
+        "availability": [],
+        "today": "2027-03-01",
+        "weeks": 1,
+    }
+    response = client.post("/v1/plans/next-block", headers=_headers(), json=request)
+    assert response.status_code == 422
