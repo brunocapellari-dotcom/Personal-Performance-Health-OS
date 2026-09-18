@@ -8,6 +8,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from healthos.auth import (
+    authenticate_active_token,
     authenticate_token,
     create_challenge,
     enroll_device,
@@ -61,6 +62,26 @@ def test_device_challenge_is_signed_bound_and_single_use() -> None:
                 signature_b64=base64.b64encode(signature).decode("ascii"),
                 settings=settings,
             )
+
+
+def test_disabled_device_invalidates_existing_token_immediately() -> None:
+    settings = _settings()
+    database = Database(settings)
+    database.create_schema_for_tests(settings)
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_pem = private_key.public_key().public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("utf-8")
+    with database.session() as db:
+        device = enroll_device(db, device_id="revoked-1", public_key_pem=public_pem)
+        token = issue_access_token(device=device, settings=settings)
+        assert authenticate_active_token(db, token, settings).device_id == "revoked-1"
+        device.enabled = False
+        db.flush()
+        with pytest.raises(ValueError, match="disabled or no longer enrolled"):
+            authenticate_active_token(db, token, settings)
+
 
 
 def test_readonly_principal_cannot_mutate() -> None:
