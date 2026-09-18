@@ -138,6 +138,23 @@ def authenticate_token(token: str, settings: Settings) -> Principal:
     return Principal(device_id=device_id, role=role)
 
 
+def authenticate_active_token(db: Session, token: str, settings: Settings) -> Principal:
+    principal = authenticate_token(token, settings)
+    if (
+        settings.test_bearer_token
+        and not settings.is_production
+        and principal.device_id == "test-device"
+        and secure_compare(token, settings.test_bearer_token)
+    ):
+        return principal
+    device = active_device(db, principal.device_id)
+    if device is None:
+        raise ValueError("device is disabled or no longer enrolled")
+    if device.role != principal.role:
+        raise ValueError("device role changed; re-authentication required")
+    return principal
+
+
 def require_owner(principal: Principal) -> None:
     if principal.role != "owner_device":
         raise PermissionError("owner_device role required")
