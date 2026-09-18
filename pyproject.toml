@@ -1,0 +1,73 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "personal-performance-health-os"
+version = "0.2.0"
+description = "Local-first, audited Personal Performance & Health OS"
+requires-python = ">=3.11"
+authors = [{name = "Personal Performance & Health OS"}]
+dependencies = [
+    "alembic>=1.16",
+    "cryptography>=45",
+    "defusedxml>=0.7.1",
+    "fastapi>=0.116",
+    "httpx>=0.28",
+    "psycopg[binary]>=3.2",
+    "pydantic>=2.11",
+    "PyJWT[crypto]>=2.10",
+    "sqlalchemy>=2.0",
+    "uvicorn[standard]>=0.35",
+]
+
+[project.optional-dependencies]
+fit = ["fitdecode>=0.11"]
+dev = [
+    "bandit>=1.8",
+    "hypothesis>=6.138",
+    "mypy>=1.18",
+    "pip-audit>=2.9",
+    "pytest>=9",
+    "pytest-cov>=7",
+    "ruff>=0.13",
+    "schemathesis>=4.2",
+    "types-defusedxml>=0.7.0.20250822",
+]
+
+[project.scripts]
+healthos-demo = "healthos.cli:demo"
+healthos-api = "healthos.api:run"
+healthos-ops = "healthos.ops:main"
+
+[tool.setuptools.packages.find]
+include = ["healthos*"]
+exclude = ["tests*", "schemas*", "android*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "postgres: requires the canonical PostgreSQL integration database",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["healthos"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["healthos"]

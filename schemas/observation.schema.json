@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HealthOS Observation",
+  "type": "object",
+  "required": ["observation_id", "metric", "value", "observed_at", "recorded_at", "source_id", "source_type"],
+  "properties": {
+    "observation_id": {"type": "string"},
+    "metric": {"type": "string"},
+    "value": {},
+    "unit": {"type": ["string", "null"]},
+    "observed_at": {"type": "string", "format": "date-time"},
+    "recorded_at": {"type": "string", "format": "date-time"},
+    "source_id": {"type": "string"},
+    "source_type": {"type": "string"},
+    "raw_hash": {"type": ["string", "null"]},
+    "quality": {"type": "string"},
+    "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "metadata": {"type": "object"}
+  },
+  "additionalProperties": false
+}

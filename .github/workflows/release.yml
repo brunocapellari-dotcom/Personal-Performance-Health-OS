@@ -1,0 +1,80 @@
+name: release-artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
+jobs:
+  release:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          gradle-version: '9.6.1'
+
+      - name: Install Android SDK 37
+        run: sdkmanager "platforms;android-37" "build-tools;36.0.0"
+
+      - name: Build release APK
+        run: gradle -p android --no-daemon :app:assembleRelease
+
+      - name: Build backend container
+        run: docker build --pull -t healthos-api:release .
+
+      - name: Save reproducible release subjects
+        run: |
+          mkdir -p dist
+          cp android/app/build/outputs/apk/release/app-release.apk dist/healthos-release.apk
+          docker save healthos-api:release | gzip -9 > dist/healthos-api.tar.gz
+          sha256sum dist/healthos-release.apk dist/healthos-api.tar.gz > dist/SHA256SUMS
+
+      - name: Generate container SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: healthos-api:release
+          format: cyclonedx
+          output: dist/healthos-api.cdx.json
+
+      - name: Attest APK provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/healthos-release.apk
+
+      - name: Attest backend provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/healthos-api.tar.gz
+
+      - name: Attest backend SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/healthos-api.tar.gz
+          sbom-path: dist/healthos-api.cdx.json
+
+      - name: Upload release evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: healthos-${{ github.sha }}
+          path: |
+            dist/healthos-release.apk
+            dist/healthos-api.tar.gz
+            dist/healthos-api.cdx.json
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30

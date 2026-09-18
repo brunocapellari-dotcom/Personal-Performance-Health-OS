@@ -1,0 +1,74 @@
+services:
+  postgres:
+    image: postgres:18.6
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: healthos
+      POSTGRES_USER: healthos
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U healthos -d healthos"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - db
+
+  api:
+    image: healthos-api:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HEALTHOS_ENV: production
+      HEALTHOS_DATABASE_URL: postgresql+psycopg://healthos:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/healthos
+      HEALTHOS_BOOTSTRAP_TOKEN: ${HEALTHOS_BOOTSTRAP_TOKEN:?set HEALTHOS_BOOTSTRAP_TOKEN}
+      HEALTHOS_JWT_SECRET: ${HEALTHOS_JWT_SECRET:?set HEALTHOS_JWT_SECRET}
+      HEALTHOS_AUDIT_HMAC_KEY: ${HEALTHOS_AUDIT_HMAC_KEY:?set HEALTHOS_AUDIT_HMAC_KEY}
+      HEALTHOS_BLOB_KEY_B64: ${HEALTHOS_BLOB_KEY_B64:?set HEALTHOS_BLOB_KEY_B64}
+      HEALTHOS_BACKUP_KEY_B64: ${HEALTHOS_BACKUP_KEY_B64:?set HEALTHOS_BACKUP_KEY_B64}
+      HEALTHOS_BLOB_DIRECTORY: /data/blobs
+      USDA_FDC_API_KEY: ${USDA_FDC_API_KEY:-}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - blob_data:/data/blobs
+    networks:
+      - db
+      - egress
+
+  migrate:
+    image: healthos-api:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles: ["ops"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HEALTHOS_ENV: production
+      HEALTHOS_DATABASE_URL: postgresql+psycopg://healthos:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/healthos
+      HEALTHOS_BOOTSTRAP_TOKEN: ${HEALTHOS_BOOTSTRAP_TOKEN:?set HEALTHOS_BOOTSTRAP_TOKEN}
+      HEALTHOS_JWT_SECRET: ${HEALTHOS_JWT_SECRET:?set HEALTHOS_JWT_SECRET}
+      HEALTHOS_AUDIT_HMAC_KEY: ${HEALTHOS_AUDIT_HMAC_KEY:?set HEALTHOS_AUDIT_HMAC_KEY}
+      HEALTHOS_BLOB_KEY_B64: ${HEALTHOS_BLOB_KEY_B64:?set HEALTHOS_BLOB_KEY_B64}
+      HEALTHOS_BACKUP_KEY_B64: ${HEALTHOS_BACKUP_KEY_B64:?set HEALTHOS_BACKUP_KEY_B64}
+    command: ["alembic", "upgrade", "head"]
+    networks:
+      - db
+
+networks:
+  db:
+    internal: true
+  egress:
+
+volumes:
+  postgres_data:
+  blob_data:

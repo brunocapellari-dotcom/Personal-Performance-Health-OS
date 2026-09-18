@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Health OS</string>
+    <string name="health_permissions_rationale">Health OS reads only the health and fitness data you explicitly authorize so it can adapt training, recovery and nutrition. Data is stored encrypted on-device and synced only to your Health OS backend.</string>
+</resources>

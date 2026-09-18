@@ -1,0 +1,49 @@
+name: codeql
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main, final-production-architecture]
+  schedule:
+    - cron: '23 6 * * 1'
+permissions:
+  contents: read
+  security-events: write
+jobs:
+  analyze:
+    name: codeql-${{ matrix.language }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: python
+            build_mode: none
+          - language: java-kotlin
+            build_mode: manual
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build_mode }}
+      - name: Set up Java
+        if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Gradle
+        if: matrix.language == 'java-kotlin'
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          gradle-version: '9.6.1'
+      - name: Install Android SDK 37
+        if: matrix.language == 'java-kotlin'
+        run: sdkmanager "platforms;android-37" "build-tools;36.0.0"
+      - name: Build Android for CodeQL
+        if: matrix.language == 'java-kotlin'
+        run: gradle -p android --no-daemon :app:assembleDebug
+      - name: Analyze
+        uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0

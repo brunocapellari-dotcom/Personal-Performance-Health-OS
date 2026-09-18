@@ -1,0 +1,190 @@
+name: full-project-quality
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main, final-production-architecture]
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: healthos
+          POSTGRES_PASSWORD: run-${{ github.run_id }}
+          POSTGRES_DB: healthos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U healthos -d healthos_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      HEALTHOS_ENV: test
+      HEALTHOS_DATABASE_URL: postgresql+psycopg://healthos:run-${{ github.run_id }}@127.0.0.1:5432/healthos_test
+      HEALTHOS_TEST_POSTGRES_URL: postgresql+psycopg://healthos:run-${{ github.run_id }}@127.0.0.1:5432/healthos_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - name: Generate ephemeral CI credentials
+        run: |
+          python - <<'PY'
+          import base64
+          import os
+          import secrets
+          values = {
+              "HEALTHOS_BOOTSTRAP_TOKEN": secrets.token_urlsafe(48),
+              "HEALTHOS_JWT_SECRET": secrets.token_urlsafe(48),
+              "HEALTHOS_AUDIT_HMAC_KEY": secrets.token_urlsafe(48),
+              "HEALTHOS_BLOB_KEY_B64": base64.urlsafe_b64encode(os.urandom(32)).decode("ascii"),
+              "HEALTHOS_BACKUP_KEY_B64": base64.urlsafe_b64encode(os.urandom(32)).decode("ascii"),
+              "HEALTHOS_TEST_BEARER_TOKEN": secrets.token_urlsafe(48),
+          }
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as target:
+              for key, value in values.items():
+                  target.write(f"{key}={value}\n")
+          PY
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e '.[dev]'
+      - run: alembic upgrade head
+      - run: alembic check
+      - run: python -m compileall -q healthos tests migrations
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: mypy healthos
+      - run: bandit -r healthos -q
+      - run: pip-audit
+      - run: pytest --cov=healthos --cov-report=term-missing --cov-fail-under=85
+      - name: Start API for OpenAPI fuzzing
+        run: |
+          uvicorn healthos.api:app --host 127.0.0.1 --port 8000 > /tmp/healthos-api.log 2>&1 &
+          echo $! > /tmp/healthos-api.pid
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8000/healthz > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/healthos-api.log
+          exit 1
+      - name: Fuzz authenticated application API
+        run: >-
+          schemathesis run http://127.0.0.1:8000/openapi.json
+          --header "Authorization: Bearer ${HEALTHOS_TEST_BEARER_TOKEN}"
+          --exclude-path-regex '^/v1/(devices/enroll|auth/)'
+          --phases=examples,coverage,fuzzing
+          --max-examples 50
+          --max-response-time 3
+          --continue-on-failure
+      - name: Stop API
+        if: always()
+        run: |
+          if [ -f /tmp/healthos-api.pid ]; then
+            kill "$(cat /tmp/healthos-api.pid)" || true
+          fi
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          gradle-version: '9.6.1'
+      - name: Install Android SDK 37
+        run: sdkmanager "platforms;android-37" "build-tools;36.0.0"
+      - name: Android full regression
+        run: >-
+          gradle -p android --no-daemon
+          :app:testDebugUnitTest
+          :app:lintDebug
+          :app:assembleDebug
+          :app:assembleRelease
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Scan repository before packaging
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+      - name: Generate ephemeral production-like environment
+        run: |
+          python - <<'PY'
+          import base64
+          import os
+          import secrets
+          values = {
+              "POSTGRES_PASSWORD": secrets.token_urlsafe(32),
+              "HEALTHOS_BOOTSTRAP_TOKEN": secrets.token_urlsafe(48),
+              "HEALTHOS_JWT_SECRET": secrets.token_urlsafe(48),
+              "HEALTHOS_AUDIT_HMAC_KEY": secrets.token_urlsafe(48),
+              "HEALTHOS_BLOB_KEY_B64": base64.urlsafe_b64encode(os.urandom(32)).decode("ascii"),
+              "HEALTHOS_BACKUP_KEY_B64": base64.urlsafe_b64encode(os.urandom(32)).decode("ascii"),
+          }
+          with open(".env", "w", encoding="utf-8") as target:
+              for key, value in values.items():
+                  target.write(f"{key}={value}\n")
+          PY
+      - name: Build canonical image
+        run: docker compose build api
+      - name: Verify image runs as non-root
+        run: docker run --rm --entrypoint sh healthos-api:local -c 'test "$(id -u)" -ne 0'
+      - name: Apply production migrations
+        run: docker compose --profile ops run --rm migrate
+      - name: Start production-like stack
+        run: docker compose up -d api
+      - name: Smoke-test deployed API
+        run: |
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8000/healthz > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker compose logs api
+          exit 1
+      - name: Scan canonical image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: healthos-api:local
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+      - name: Tear down production-like stack
+        if: always()
+        run: docker compose down -v --remove-orphans
+
+  full-project:
+    runs-on: ubuntu-latest
+    needs: [backend, android, container]
+    if: always()
+    steps:
+      - name: Enforce complete project gate
+        env:
+          BACKEND_RESULT: ${{ needs.backend.result }}
+          ANDROID_RESULT: ${{ needs.android.result }}
+          CONTAINER_RESULT: ${{ needs.container.result }}
+        run: |
+          test "$BACKEND_RESULT" = "success"
+          test "$ANDROID_RESULT" = "success"
+          test "$CONTAINER_RESULT" = "success"
+          echo "Backend, Android and production container gates passed on the same commit."

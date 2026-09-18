@@ -1,0 +1,241 @@
+package com.brunocapellari.healthos.data
+
+import com.brunocapellari.healthos.health.HealthConnectGateway
+import com.brunocapellari.healthos.health.HealthConnectTokenExpiredException
+import com.brunocapellari.healthos.health.HealthDelta
+import com.brunocapellari.healthos.health.TrackedHealthType
+import com.brunocapellari.healthos.network.HealthOsApiClient
+import com.brunocapellari.healthos.security.DeviceIdentity
+import org.json.JSONArray
+import org.json.JSONObject
+import java.security.MessageDigest
+
+
+data class SyncSummary(
+    val healthEventsStaged: Int,
+    val healthIngestionSkipped: Boolean,
+    val pushed: Int,
+    val conflicts: Int,
+    val pulled: Int,
+    val pending: Int,
+)
+
+class HealthDataRepository(
+    private val database: HealthOsDatabase,
+    private val healthConnect: HealthConnectGateway,
+    private val api: HealthOsApiClient,
+    private val identity: DeviceIdentity,
+) {
+    suspend fun enroll(bootstrapToken: String) {
+        api.enroll(bootstrapToken, identity)
+    }
+
+    suspend fun fullSync(): SyncSummary {
+        val canIngestHealth = healthConnect.hasPermissions(healthConnect.extendedReadPermissions())
+        val staged = if (canIngestHealth) ingestHealthConnect() else 0
+        val network = syncBackend()
+        return network.copy(
+            healthEventsStaged = staged,
+            healthIngestionSkipped = !canIngestHealth,
+        )
+    }
+
+    suspend fun ingestHealthConnect(): Int {
+        if (!healthConnect.hasPermissions(healthConnect.extendedReadPermissions())) {
+            throw IllegalStateException("Health Connect permissions are incomplete")
+        }
+        var staged = 0
+        for (type in TrackedHealthType.entries) {
+            staged += syncHealthType(type)
+        }
+        return staged
+    }
+
+    suspend fun pendingCount(): Int = database.pendingChangeDao().count()
+
+    suspend fun conflictCount(): Int = database.syncConflictDao().count()
+
+    private suspend fun syncHealthType(type: TrackedHealthType): Int {
+        val stateKey = "health_connect_token_${type.wireName}"
+        val state = database.syncStateDao().get(stateKey)
+        var token = state?.value
+        var staged = 0
+
+        if (token == null) {
+            token = healthConnect.newToken(type)
+            staged += stageDeltas(healthConnect.backfill(type))
+        }
+
+        val batch = try {
+            healthConnect.drain(type, token)
+        } catch (_: HealthConnectTokenExpiredException) {
+            token = healthConnect.newToken(type)
+            staged += stageDeltas(healthConnect.backfill(type))
+            healthConnect.drain(type, token)
+        }
+        staged += stageDeltas(batch.deltas)
+        database.syncStateDao().upsert(
+            SyncStateEntity(
+                key = stateKey,
+                value = batch.nextToken,
+                updatedAtEpochMillis = System.currentTimeMillis(),
+            ),
+        )
+        return staged
+    }
+
+    private suspend fun stageDeltas(deltas: List<HealthDelta>): Int {
+        var inserted = 0
+        for (delta in deltas) {
+            val currentKey = "${delta.recordType.wireName}:${delta.recordId}"
+            val existing = database.observationDao().get(currentKey)
+            val current = if (delta.deleted) {
+                existing?.copy(deleted = true) ?: LocalObservationEntity(
+                    observationId = currentKey,
+                    recordType = delta.recordType.wireName,
+                    sourceRecordId = delta.recordId,
+                    observedAtEpochMillis = delta.observedAtEpochMillis,
+                    payloadJson = "{}",
+                    dataOriginPackage = delta.dataOriginPackage,
+                    deleted = true,
+                )
+            } else {
+                LocalObservationEntity(
+                    observationId = currentKey,
+                    recordType = delta.recordType.wireName,
+                    sourceRecordId = delta.recordId,
+                    observedAtEpochMillis = delta.observedAtEpochMillis,
+                    payloadJson = delta.payloadJson,
+                    dataOriginPackage = delta.dataOriginPackage,
+                    deleted = false,
+                )
+            }
+            database.observationDao().upsert(current)
+
+            val fingerprint = if (delta.deleted) {
+                "delete|${delta.recordType.wireName}|${delta.recordId}"
+            } else {
+                "upsert|${delta.recordType.wireName}|${delta.recordId}|${delta.payloadJson}"
+            }
+            val changeId = sha256(fingerprint)
+            val payload = JSONObject()
+                .put("record_type", delta.recordType.wireName)
+                .put("source_record_id", delta.recordId)
+                .put("observed_at_epoch_ms", delta.observedAtEpochMillis)
+                .put("data_origin_package", delta.dataOriginPackage)
+                .put("health_connect_deleted", delta.deleted)
+                .put("data", JSONObject(delta.payloadJson))
+            val result = database.pendingChangeDao().insert(
+                PendingChangeEntity(
+                    changeId = changeId,
+                    entityType = if (delta.deleted) "health_connect_tombstone" else "observation",
+                    entityId = changeId,
+                    logicalClock = delta.observedAtEpochMillis.coerceAtLeast(1),
+                    deleted = false,
+                    payloadJson = payload.toString(),
+                    createdAtEpochMillis = System.currentTimeMillis(),
+                ),
+            )
+            if (result != -1L) inserted += 1
+        }
+        return inserted
+    }
+
+    private suspend fun syncBackend(): SyncSummary {
+        val token = api.authenticate(identity)
+        var pushed = 0
+        var conflictCount = 0
+
+        while (true) {
+            val pending = database.pendingChangeDao().oldest(250)
+            if (pending.isEmpty()) break
+            val response = api.push(
+                token,
+                JSONArray().apply {
+                    pending.forEach { change ->
+                        put(
+                            JSONObject()
+                                .put("change_id", change.changeId)
+                                .put("entity_type", change.entityType)
+                                .put("entity_id", change.entityId)
+                                .put("logical_clock", change.logicalClock)
+                                .put("deleted", change.deleted)
+                                .put("payload", JSONObject(change.payloadJson)),
+                        )
+                    }
+                },
+            )
+            val accepted = response.getJSONArray("accepted").toStringList()
+            val duplicates = response.getJSONArray("duplicates").toStringList()
+            val conflicts = response.getJSONArray("conflicts").toStringList()
+            val pendingById = pending.associateBy { it.changeId }
+            conflicts.forEach { id ->
+                pendingById[id]?.let { change ->
+                    database.syncConflictDao().upsert(
+                        SyncConflictEntity(
+                            changeId = change.changeId,
+                            entityType = change.entityType,
+                            entityId = change.entityId,
+                            payloadJson = change.payloadJson,
+                            detectedAtEpochMillis = System.currentTimeMillis(),
+                        ),
+                    )
+                }
+            }
+            database.pendingChangeDao().delete(accepted + duplicates + conflicts)
+            pushed += accepted.size + duplicates.size
+            conflictCount += conflicts.size
+            if (accepted.isEmpty() && duplicates.isEmpty() && conflicts.isEmpty()) {
+                throw IllegalStateException("Sync push made no progress")
+            }
+        }
+
+        val pulled = pullAll(token)
+        return SyncSummary(
+            healthEventsStaged = 0,
+            healthIngestionSkipped = false,
+            pushed = pushed,
+            conflicts = conflictCount,
+            pulled = pulled,
+            pending = database.pendingChangeDao().count(),
+        )
+    }
+
+    private suspend fun pullAll(token: String): Int {
+        val cursorState = database.syncStateDao().get("backend_cursor")
+        var cursor = cursorState?.value?.toLongOrNull() ?: 0L
+        var pulled = 0
+        while (true) {
+            val response = api.pull(token, cursor)
+            val changes = response.getJSONArray("changes")
+            for (index in 0 until changes.length()) {
+                val item = changes.getJSONObject(index)
+                database.remoteEntityDao().upsert(
+                    RemoteEntityEntity(
+                        entityType = item.getString("entity_type"),
+                        entityId = item.getString("entity_id"),
+                        logicalClock = item.getLong("logical_clock"),
+                        originDeviceId = item.getString("origin_device_id"),
+                        deleted = item.getBoolean("deleted"),
+                        payloadJson = item.getJSONObject("payload").toString(),
+                        serverSeq = item.getLong("server_seq"),
+                    ),
+                )
+                pulled += 1
+            }
+            val next = response.getLong("cursor")
+            database.syncStateDao().upsert(
+                SyncStateEntity("backend_cursor", next.toString(), System.currentTimeMillis()),
+            )
+            if (changes.length() < 500 || next <= cursor) break
+            cursor = next
+        }
+        return pulled
+    }
+
+    private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
+        .digest(value.toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }
+
+    private fun JSONArray.toStringList(): List<String> = List(length()) { index -> getString(index) }
+}

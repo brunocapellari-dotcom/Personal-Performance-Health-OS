@@ -1,0 +1,35 @@
+name: post-public-sanitization
+
+on:
+  public:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  sanitize-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete pre-public Actions history
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current="${GITHUB_RUN_ID}"
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs?per_page=100" --jq '.workflow_runs[].id' |
+          while read -r run_id; do
+            if [ "${run_id}" != "${current}" ]; then
+              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" || true
+            fi
+          done
+
+      - name: Dispatch full project regression
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --ref main
+
+      - name: Dispatch CodeQL
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run codeql.yml --ref main
