@@ -17,6 +17,7 @@ from .domain import (
     Phase,
     ReadinessInput,
     SessionPlan,
+    StrengthProgression,
     TrainingEnvironment,
     TrainingResponse,
 )
@@ -55,6 +56,7 @@ class PerformanceDirector:
         weeks: int = 4,
         training_response: TrainingResponse | None = None,
         availability: tuple[AvailabilityWindow, ...] = (),
+        strength_progressions: dict[str, StrengthProgression] | None = None,
     ) -> BlockPlan:
         goal_decisions = self.goal_conflicts.decide(goals, event, today)
         goal_gaps = self.goal_gaps.calculate(goals)
@@ -70,6 +72,7 @@ class PerformanceDirector:
         if readiness_decision.action in {"LOW_INTENSITY_OR_TECHNIQUE", "RECOVERY_BIASED", "SAFETY_REVIEW"}:
             readiness_modifier = 0.65
         volume_modifier = min(readiness_modifier, response_decision.volume_modifier)
+        strength_progressions = strength_progressions or {}
 
         def prescribe(exercise_ids: tuple[str, ...], phase: Phase) -> tuple[ExercisePrescription, ...]:
             if phase in {Phase.INTENSIFICATION, Phase.REALIZATION}:
@@ -86,7 +89,11 @@ class PerformanceDirector:
                     sets=sets,
                     rep_range=reps,
                     target_rir=adjusted_rir,
-                    load_kg=None,
+                    load_kg=(
+                        strength_progressions[exercise_id].next_load_kg
+                        if exercise_id in strength_progressions
+                        else None
+                    ),
                     rest_seconds=rest,
                 )
                 for exercise_id in exercise_ids
@@ -293,6 +300,13 @@ class PerformanceDirector:
                 "sessions_per_week": sessions_per_week,
                 "availability_enforced": bool(availability),
                 "availability_limits": availability_limits,
+                "strength_progressions": {
+                    exercise_id: {
+                        "next_load_kg": decision.next_load_kg,
+                        "rationale": decision.rationale,
+                    }
+                    for exercise_id, decision in sorted(strength_progressions.items())
+                },
             },
         )
 
