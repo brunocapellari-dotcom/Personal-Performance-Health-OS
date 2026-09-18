@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.brunocapellari.healthos.HealthOsApplication
+import com.brunocapellari.healthos.data.HealthIngestionMode
 import java.io.IOException
 
 class SyncWorker(
@@ -13,7 +14,7 @@ class SyncWorker(
     override suspend fun doWork(): Result {
         val application = applicationContext as HealthOsApplication
         return try {
-            application.container.repository.fullSync()
+            application.container.repository.fullSync(HealthIngestionMode.BACKGROUND)
             Result.success()
         } catch (_: IOException) {
             retryOrFail()
