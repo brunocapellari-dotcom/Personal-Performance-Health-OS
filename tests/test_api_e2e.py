@@ -243,3 +243,105 @@ def test_api_rejects_impossible_training_response() -> None:
     }
     response = client.post("/v1/plans/next-block", headers=_headers(), json=request)
     assert response.status_code == 422
+
+
+def test_minimal_next_block_reads_synced_state_and_cache_tracks_state_changes() -> None:
+    client = _client()
+    seed = {
+        "changes": [
+            {
+                "change_id": "canonical-goal-1",
+                "entity_type": "goal",
+                "entity_id": "canonical-distance",
+                "logical_clock": 1,
+                "payload": {
+                    "goal_id": "canonical-distance",
+                    "description": "Synthetic canonical goal",
+                    "priority": 5,
+                    "baseline": 5.0,
+                    "target": 20.0,
+                    "metric": "distance_km",
+                    "constraints": [],
+                },
+            },
+            {
+                "change_id": "canonical-env-1",
+                "entity_type": "training_environment",
+                "entity_id": "home",
+                "logical_clock": 1,
+                "payload": {
+                    "environment": "HOME",
+                    "equipment": ["dumbbells", "band", "step"],
+                    "space_m2": 10,
+                    "fixation_points": [],
+                    "noise_limit": "moderate",
+                    "surface": "indoor",
+                    "available_minutes": 60,
+                },
+            },
+            {
+                "change_id": "canonical-ready-1",
+                "entity_type": "readiness",
+                "entity_id": "ready-1",
+                "logical_clock": 1,
+                "payload": {
+                    "observed_at": "2027-03-01T07:00:00Z",
+                    "sleep_hours": 7.5,
+                    "sleep_quality_1_5": 4,
+                    "energy_1_5": 4,
+                    "fatigue_1_5": 2,
+                    "soreness_1_5": 2,
+                    "stress_1_5": 2,
+                    "pain_flag": False,
+                },
+            },
+            {
+                "change_id": "canonical-calendar-1",
+                "entity_type": "calendar_availability",
+                "entity_id": "2027-03-02",
+                "logical_clock": 1,
+                "payload": {"day": "2027-03-02", "available_minutes": 45},
+            },
+            {
+                "change_id": "canonical-calendar-2",
+                "entity_type": "calendar_availability",
+                "entity_id": "2027-03-05",
+                "logical_clock": 1,
+                "payload": {"day": "2027-03-05", "available_minutes": 50},
+            },
+        ]
+    }
+    seeded = client.post("/v1/sync/push", headers=_headers(), json=seed)
+    assert seeded.status_code == 200, seeded.text
+
+    command = {"today": "2027-03-01", "weeks": 1}
+    first = client.post("/v1/plans/next-block", headers=_headers(), json=command)
+    assert first.status_code == 200, first.text
+    repeated = client.post("/v1/plans/next-block", headers=_headers(), json=command)
+    assert repeated.status_code == 200
+    assert repeated.json()["snapshot_id"] == first.json()["snapshot_id"]
+    assert first.json()["plan"]["metadata"]["goal_gaps"]["canonical-distance"]["absolute_gap"] == 15.0
+
+    assessment = {
+        "changes": [
+            {
+                "change_id": "canonical-assessment-1",
+                "entity_type": "assessment_result",
+                "entity_id": "assessment-distance",
+                "logical_clock": 1,
+                "payload": {
+                    "assessment_id": "assessment-distance",
+                    "metric": "distance_km",
+                    "value": 9.0,
+                    "unit": "km",
+                    "observed_at": "2027-03-01T12:00:00Z",
+                },
+            }
+        ]
+    }
+    assessed = client.post("/v1/sync/push", headers=_headers(), json=assessment)
+    assert assessed.status_code == 200, assessed.text
+    changed = client.post("/v1/plans/next-block", headers=_headers(), json=command)
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["snapshot_id"] != first.json()["snapshot_id"]
+    assert changed.json()["plan"]["metadata"]["goal_gaps"]["canonical-distance"]["absolute_gap"] == 11.0
