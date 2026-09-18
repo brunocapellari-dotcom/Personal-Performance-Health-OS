@@ -308,6 +308,7 @@ def create_app(
                 noise_limit=payload.environment.noise_limit,
                 surface=payload.environment.surface,
                 available_minutes=payload.environment.available_minutes,
+                load_options_kg=tuple(sorted(payload.environment.load_options_kg)),
             )
             if payload.environment is not None
             else synced_environment
