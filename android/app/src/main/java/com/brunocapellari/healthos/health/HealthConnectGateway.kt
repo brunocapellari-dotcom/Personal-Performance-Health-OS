@@ -67,7 +67,7 @@ class HealthConnectGateway private constructor(
 
     internal constructor(client: HealthConnectClient) : this(null, client)
 
-    fun sdkStatus(): Int = context?.let(HealthConnectClient::getSdkStatus) ?: HealthConnectClient.SDK_AVAILABLE
+    fun sdkStatus(): Int = if (context != null) HealthConnectClient.getSdkStatus(context) else HealthConnectClient.SDK_AVAILABLE
 
     fun readPermissions(): Set<String> = TrackedHealthType.entries
         .mapTo(mutableSetOf()) { HealthPermission.getReadPermission(it.recordClass) }
