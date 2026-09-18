@@ -89,6 +89,7 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("com.squareup.okhttp3:mockwebserver3:5.5.0")
+    testImplementation("androidx.health.connect:connect-testing:1.0.0-alpha04")
 
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
