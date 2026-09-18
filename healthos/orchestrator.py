@@ -13,6 +13,7 @@ from .domain import (
     ReadinessInput,
     TrainingEnvironment,
     TrainingResponse,
+    StrengthProgression,
 )
 from .planner import PerformanceDirector, ProgramAuditor
 
@@ -42,6 +43,7 @@ class HealthOS:
         weeks: int = 4,
         training_response: TrainingResponse | None = None,
         availability: tuple[AvailabilityWindow, ...] = (),
+        strength_progressions: dict[str, StrengthProgression] | None = None,
     ) -> NextBlockResult:
         plan = self.director.build_next_block(
             goals=goals,
@@ -53,6 +55,7 @@ class HealthOS:
             weeks=weeks,
             training_response=training_response,
             availability=availability,
+            strength_progressions=strength_progressions,
         )
         audit = self.auditor.audit(plan, environment)
         return NextBlockResult(plan=plan, audit=audit)
