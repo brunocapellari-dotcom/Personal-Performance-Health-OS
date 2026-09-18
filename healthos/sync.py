@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from .audit import append_audit
 from .auth import sha256_hex
 from .config import Settings
+from .entity_payloads import validate_entity_payload
 from .models import ChangeLogModel, EntityRecordModel
 
 APPEND_ONLY_TYPES = frozenset(
@@ -21,6 +22,7 @@ APPEND_ONLY_TYPES = frozenset(
         "medication_event",
         "supplement_event",
         "assessment_result",
+        "body_measurement",
     }
 )
 
@@ -72,13 +74,14 @@ def push_changes(
             raise ValueError("logical_clock must be >= 1")
         if change.entity_type in APPEND_ONLY_TYPES and change.deleted:
             raise ValueError(f"{change.entity_type} is append-only and cannot be deleted")
+        normalized_payload = validate_entity_payload(change.entity_type, change.entity_id, change.payload)
         if db.scalar(select(ChangeLogModel.change_id).where(ChangeLogModel.change_id == change.change_id)):
             duplicates.append(change.change_id)
             continue
 
         current = db.get(EntityRecordModel, (change.entity_type, change.entity_id))
         if current is not None and change.entity_type in APPEND_ONLY_TYPES:
-            incoming_hash = sha256_hex(change.payload)
+            incoming_hash = sha256_hex(normalized_payload)
             current_hash = sha256_hex(current.payload)
             if incoming_hash != current_hash or current.deleted != change.deleted:
                 conflicts.append(change.change_id)
@@ -99,7 +102,7 @@ def push_changes(
                 logical_clock=change.logical_clock,
                 origin_device_id=device_id,
                 deleted=change.deleted,
-                payload=change.payload,
+                payload=normalized_payload,
                 updated_at=now,
             )
             db.add(current)
@@ -107,7 +110,7 @@ def push_changes(
             current.logical_clock = change.logical_clock
             current.origin_device_id = device_id
             current.deleted = change.deleted
-            current.payload = change.payload
+            current.payload = normalized_payload
             current.updated_at = now
 
         db.add(
@@ -118,7 +121,7 @@ def push_changes(
                 logical_clock=change.logical_clock,
                 origin_device_id=device_id,
                 deleted=change.deleted,
-                payload=change.payload,
+                payload=normalized_payload,
                 created_at=now,
             )
         )
