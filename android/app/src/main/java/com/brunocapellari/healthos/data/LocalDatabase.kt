@@ -106,6 +106,9 @@ interface ObservationDao {
 
     @Upsert
     suspend fun upsert(observation: LocalObservationEntity)
+
+    @Query("SELECT MAX(observedAtEpochMillis) FROM health_observations WHERE recordType = :recordType")
+    suspend fun latestObservedAt(recordType: String): Long?
 }
 
 @Dao
