@@ -47,6 +47,7 @@ from .domain import AvailabilityWindow, Event, Goal, NutritionTrend, ReadinessIn
 from .models import PlanSnapshotModel
 from .nutrition_sources import OpenFoodFactsProvider, UsdaFoodDataCentralProvider
 from .orchestrator import HealthOS
+from .state import PlanningStateResolver
 from .sync import IncomingChange, current_cursor, pull_changes, push_changes
 
 
@@ -266,8 +267,112 @@ def create_app(
             require_owner(actor)
         except PermissionError as exc:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-        request_json = jsonable_encoder(payload)
-        request_hash = sha256_hex(request_json)
+
+        resolver = PlanningStateResolver()
+        synced_goals = resolver.goals(db)
+        synced_environment = resolver.environment(db)
+        synced_readiness = resolver.readiness(db)
+
+        if payload.goals is None and not synced_goals:
+            raise HTTPException(status_code=422, detail="no active goals are available")
+        if payload.environment is None and synced_environment is None:
+            raise HTTPException(status_code=422, detail="no training environment is available")
+        if payload.readiness is None and synced_readiness is None:
+            raise HTTPException(status_code=422, detail="no readiness input is available")
+
+        goals = (
+            tuple(
+                Goal(
+                    goal_id=goal.goal_id,
+                    description=goal.description,
+                    priority=goal.priority,
+                    baseline=goal.baseline,
+                    target=goal.target,
+                    target_date=goal.target_date,
+                    metric=goal.metric,
+                    constraints=tuple(goal.constraints),
+                    current=goal.current,
+                )
+                for goal in payload.goals
+            )
+            if payload.goals is not None
+            else synced_goals
+        )
+
+        environment = (
+            TrainingEnvironment(
+                environment=payload.environment.environment,
+                equipment=frozenset(payload.environment.equipment),
+                space_m2=payload.environment.space_m2,
+                fixation_points=frozenset(payload.environment.fixation_points),
+                noise_limit=payload.environment.noise_limit,
+                surface=payload.environment.surface,
+                available_minutes=payload.environment.available_minutes,
+            )
+            if payload.environment is not None
+            else synced_environment
+        )
+        readiness = (
+            ReadinessInput(**payload.readiness.model_dump())
+            if payload.readiness is not None
+            else synced_readiness
+        )
+        assert environment is not None
+        assert readiness is not None
+
+        fields_set = payload.model_fields_set
+        nutrition_trend = (
+            NutritionTrend(**payload.nutrition_trend.model_dump())
+            if "nutrition_trend" in fields_set and payload.nutrition_trend is not None
+            else None
+            if "nutrition_trend" in fields_set
+            else resolver.nutrition(db)
+        )
+        event = (
+            Event(
+                event_id=payload.event.event_id,
+                name=payload.event.name,
+                event_date=payload.event.event_date,
+                demands=tuple(payload.event.demands),
+                duration_minutes=payload.event.duration_minutes,
+                distance_km=payload.event.distance_km,
+                priority=payload.event.priority,
+            )
+            if "event" in fields_set and payload.event is not None
+            else None
+            if "event" in fields_set
+            else resolver.event(db, payload.today)
+        )
+        training_response = (
+            TrainingResponse(**payload.training_response.model_dump())
+            if "training_response" in fields_set and payload.training_response is not None
+            else None
+            if "training_response" in fields_set
+            else resolver.training_response(db)
+        )
+        availability = (
+            tuple(
+                AvailabilityWindow(day=window.day, available_minutes=window.available_minutes)
+                for window in payload.availability
+            )
+            if payload.availability is not None
+            else resolver.availability(db, payload.today, payload.weeks)
+        )
+
+        resolved_request = jsonable_encoder(
+            {
+                "goals": [asdict(goal) for goal in goals],
+                "environment": asdict(environment),
+                "readiness": asdict(readiness),
+                "nutrition_trend": None if nutrition_trend is None else asdict(nutrition_trend),
+                "event": None if event is None else asdict(event),
+                "training_response": None if training_response is None else asdict(training_response),
+                "availability": [asdict(window) for window in availability],
+                "today": payload.today,
+                "weeks": payload.weeks,
+            }
+        )
+        request_hash = sha256_hex(resolved_request)
         existing = db.scalar(
             select(PlanSnapshotModel).where(
                 PlanSnapshotModel.device_id == actor.device_id,
@@ -281,62 +386,28 @@ def create_app(
                 audit=dict(existing.audit_json),
             )
 
-        result = healthos.next_block(
-            goals=tuple(
-                Goal(
-                    goal_id=goal.goal_id,
-                    description=goal.description,
-                    priority=goal.priority,
-                    baseline=goal.baseline,
-                    target=goal.target,
-                    target_date=goal.target_date,
-                    metric=goal.metric,
-                    constraints=tuple(goal.constraints),
-                    current=goal.current,
-                )
-                for goal in payload.goals
-            ),
-            environment=TrainingEnvironment(
-                environment=payload.environment.environment,
-                equipment=frozenset(payload.environment.equipment),
-                space_m2=payload.environment.space_m2,
-                fixation_points=frozenset(payload.environment.fixation_points),
-                noise_limit=payload.environment.noise_limit,
-                surface=payload.environment.surface,
-                available_minutes=payload.environment.available_minutes,
-            ),
-            readiness=ReadinessInput(**payload.readiness.model_dump()),
-            nutrition_trend=NutritionTrend(**payload.nutrition_trend.model_dump()) if payload.nutrition_trend else None,
-            event=(
-                Event(
-                    event_id=payload.event.event_id,
-                    name=payload.event.name,
-                    event_date=payload.event.event_date,
-                    demands=tuple(payload.event.demands),
-                    duration_minutes=payload.event.duration_minutes,
-                    distance_km=payload.event.distance_km,
-                    priority=payload.event.priority,
-                )
-                if payload.event
-                else None
-            ),
-            today=payload.today,
-            weeks=payload.weeks,
-            training_response=(
-                TrainingResponse(**payload.training_response.model_dump()) if payload.training_response else None
-            ),
-            availability=tuple(
-                AvailabilityWindow(day=window.day, available_minutes=window.available_minutes)
-                for window in payload.availability
-            ),
-        )
+        try:
+            result = healthos.next_block(
+                goals=goals,
+                environment=environment,
+                readiness=readiness,
+                nutrition_trend=nutrition_trend,
+                event=event,
+                today=payload.today,
+                weeks=payload.weeks,
+                training_response=training_response,
+                availability=availability,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
         plan_json = jsonable_encoder(asdict(result.plan))
         audit_json = jsonable_encoder(asdict(result.audit))
         snapshot = PlanSnapshotModel(
             snapshot_id=uuid4().hex,
             device_id=actor.device_id,
             request_hash=request_hash,
-            request_json=request_json,
+            request_json=resolved_request,
             plan_json=plan_json,
             audit_json=audit_json,
         )
