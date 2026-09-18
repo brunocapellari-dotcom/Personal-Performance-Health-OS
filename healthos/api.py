@@ -21,6 +21,8 @@ from .api_models import (
     NextBlockRequest,
     NextBlockResponse,
     NutritionSearchResponse,
+    PairingTokenRequest,
+    PairingTokenResponse,
     SyncChangeOut,
     SyncPullResponse,
     SyncPushRequest,
@@ -32,8 +34,11 @@ from .audit import append_audit, verify_audit_chain
 from .auth import (
     Principal,
     authenticate_active_token,
+    consume_pairing_token,
     create_challenge,
+    create_pairing_token,
     enroll_device,
+    enrolled_device_count,
     public_key_fingerprint,
     require_owner,
     secure_compare,
@@ -125,8 +130,22 @@ def create_app(
         supplied = None
         if authorization and authorization.startswith("Bearer "):
             supplied = authorization.removeprefix("Bearer ").strip()
-        if not secure_compare(supplied, resolved_settings.bootstrap_token):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="bootstrap authorization failed")
+        device_count = enrolled_device_count(db)
+        if device_count == 0:
+            if payload.role != "owner_device":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="the first enrolled device must be owner_device",
+                )
+            if not secure_compare(supplied, resolved_settings.bootstrap_token):
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="bootstrap authorization failed")
+        else:
+            if supplied is None:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="pairing token required")
+            try:
+                consume_pairing_token(db, token=supplied, requested_role=payload.role)
+            except ValueError as exc:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
         try:
             device = enroll_device(
                 db,
@@ -149,6 +168,28 @@ def create_app(
             role=device.role,
             fingerprint=public_key_fingerprint(device.public_key_pem),
         )
+
+    @app.post("/v1/devices/pairing-token", response_model=PairingTokenResponse)
+    def device_pairing_token(payload: PairingTokenRequest, db: DbSession, actor: Actor) -> PairingTokenResponse:
+        try:
+            require_owner(actor)
+            token, expires_at = create_pairing_token(
+                db,
+                issued_by_device_id=actor.device_id,
+                role=payload.role,
+                ttl_seconds=payload.ttl_seconds,
+            )
+        except PermissionError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        append_audit(
+            db,
+            resolved_settings,
+            actor_device_id=actor.device_id,
+            action="device.pairing_token.create",
+            target=payload.role,
+            payload={"role": payload.role, "expires_at": expires_at.isoformat()},
+        )
+        return PairingTokenResponse(token=token, role=payload.role, expires_at=expires_at)
 
     @app.post("/v1/auth/challenge", response_model=ChallengeResponse)
     def auth_challenge(payload: ChallengeRequest, db: DbSession) -> ChallengeResponse:
