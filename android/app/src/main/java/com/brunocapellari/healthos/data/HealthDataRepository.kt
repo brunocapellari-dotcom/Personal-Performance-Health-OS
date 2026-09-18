@@ -1,6 +1,6 @@
 package com.brunocapellari.healthos.data
 
-import com.brunocapellari.healthos.health.HealthConnectGateway
+import com.brunocapellari.healthos.health.HealthConnectPort
 import com.brunocapellari.healthos.health.HealthConnectTokenExpiredException
 import com.brunocapellari.healthos.health.HealthDelta
 import com.brunocapellari.healthos.health.TrackedHealthType
@@ -30,7 +30,30 @@ data class HealthBackfillPolicy(
         TrackedHealthType.EXERCISE to 365,
         TrackedHealthType.WEIGHT to 1825,
     ),
-)
+) {
+    init {
+        require(windowDays > 0) { "windowDays must be positive" }
+        require(recoveryMinimumDays >= 30) { "recoveryMinimumDays must cover at least 30 days" }
+        require(historyDaysByType.values.all { it >= recoveryMinimumDays }) {
+            "history windows must not be shorter than recovery minimum"
+        }
+    }
+
+    fun initialStart(type: TrackedHealthType, now: Instant, canReadHistory: Boolean): Instant {
+        val days = if (canReadHistory) {
+            historyDaysByType[type] ?: recoveryMinimumDays
+        } else {
+            recoveryMinimumDays
+        }
+        return now.minus(Duration.ofDays(days))
+    }
+
+    fun recoveryStart(now: Instant, latestObserved: Instant?, canReadHistory: Boolean): Instant {
+        val minimumStart = now.minus(Duration.ofDays(recoveryMinimumDays))
+        if (!canReadHistory || latestObserved == null) return minimumStart
+        return if (latestObserved.isBefore(minimumStart)) latestObserved else minimumStart
+    }
+}
 
 data class SyncSummary(
     val healthEventsStaged: Int,
@@ -43,7 +66,7 @@ data class SyncSummary(
 
 class HealthDataRepository(
     private val database: HealthOsDatabase,
-    private val healthConnect: HealthConnectGateway,
+    private val healthConnect: HealthConnectPort,
     private val api: HealthOsApiClient,
     private val identity: DeviceIdentity,
     private val backfillPolicy: HealthBackfillPolicy = HealthBackfillPolicy(),
@@ -89,7 +112,7 @@ class HealthDataRepository(
 
         if (token == null) {
             token = healthConnect.newToken(type)
-            staged += backfillWindowed(type, initialBackfillStart(type, now, canReadHistory), now)
+            staged += backfillWindowed(type, backfillPolicy.initialStart(type, now, canReadHistory), now)
         }
 
         val batch = try {
@@ -110,25 +133,13 @@ class HealthDataRepository(
         return staged
     }
 
-    private fun initialBackfillStart(type: TrackedHealthType, now: Instant, canReadHistory: Boolean): Instant {
-        val days = if (canReadHistory) {
-            backfillPolicy.historyDaysByType[type] ?: backfillPolicy.recoveryMinimumDays
-        } else {
-            backfillPolicy.recoveryMinimumDays
-        }
-        return now.minus(Duration.ofDays(days))
-    }
-
     private suspend fun recoveryBackfillStart(
         type: TrackedHealthType,
         now: Instant,
         canReadHistory: Boolean,
     ): Instant {
-        val minimumStart = now.minus(Duration.ofDays(backfillPolicy.recoveryMinimumDays))
-        if (!canReadHistory) return minimumStart
-        val latestMillis = database.observationDao().latestObservedAt(type.wireName) ?: return minimumStart
-        val latest = Instant.ofEpochMilli(latestMillis)
-        return if (latest.isBefore(minimumStart)) latest else minimumStart
+        val latest = database.observationDao().latestObservedAt(type.wireName)?.let(Instant::ofEpochMilli)
+        return backfillPolicy.recoveryStart(now, latest, canReadHistory)
     }
 
     private suspend fun backfillWindowed(type: TrackedHealthType, start: Instant, end: Instant): Int {
