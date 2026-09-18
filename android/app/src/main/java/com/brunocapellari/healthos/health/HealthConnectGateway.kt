@@ -59,10 +59,15 @@ interface HealthConnectPort {
     override suspend fun drain(type: TrackedHealthType, token: String): ChangeBatch
 }
 
-class HealthConnectGateway(private val context: Context) : HealthConnectPort {
-    private val client: HealthConnectClient by lazy { HealthConnectClient.getOrCreate(context) }
+class HealthConnectGateway private constructor(
+    private val context: Context?,
+    private val client: HealthConnectClient,
+) : HealthConnectPort {
+    constructor(context: Context) : this(context, HealthConnectClient.getOrCreate(context))
 
-    fun sdkStatus(): Int = HealthConnectClient.getSdkStatus(context)
+    internal constructor(client: HealthConnectClient) : this(null, client)
+
+    fun sdkStatus(): Int = context?.let(HealthConnectClient::getSdkStatus) ?: HealthConnectClient.SDK_AVAILABLE
 
     fun readPermissions(): Set<String> = TrackedHealthType.entries
         .mapTo(mutableSetOf()) { HealthPermission.getReadPermission(it.recordClass) }
