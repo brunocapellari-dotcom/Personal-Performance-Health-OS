@@ -136,10 +136,18 @@ class MainActivity : ComponentActivity() {
                 withContext(Dispatchers.IO) { container.nextBlock.generate() }
             }.onSuccess { response ->
                 val passed = response.getJSONObject("audit").getBoolean("passed")
-                statusText.value = if (passed) {
-                    "Novo bloco auditado e aprovado (${response.getString("snapshot_id").take(8)})"
+                if (passed) {
+                    val sessions = response.getJSONObject("plan").getJSONArray("sessions")
+                    activeSessionId.value = if (sessions.length() > 0) {
+                        sessions.getJSONObject(0).getString("session_id")
+                    } else {
+                        ""
+                    }
+                    statusText.value =
+                        "Novo bloco auditado e aprovado (${response.getString("snapshot_id").take(8)}); " +
+                        "${sessions.length()} sessões planejadas"
                 } else {
-                    "Bloco rejeitado pela auditoria"
+                    statusText.value = "Bloco rejeitado pela auditoria"
                 }
             }.onFailure {
                 statusText.value = "Não foi possível montar o bloco: ${it.message ?: "erro desconhecido"}"
