@@ -159,3 +159,28 @@ def test_series_metrics_are_normalized_into_timeline_points() -> None:
     assert [item.metric for item in result.canonical] == ["speed_m_s", "speed_m_s"]
     assert [item.value for item in result.canonical] == [2.5, 3.0]
     assert result.analytics["speed_m_s"].latest_value == 3.0
+
+
+def test_vo2_max_is_normalized_with_measurement_method() -> None:
+    now = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
+    payload = _payload(
+        record_type="vo2_max",
+        source_record_id="vo2-1",
+        observed_at=now,
+        package="com.synthetic.watch",
+        data={
+            "millilitersPerMinuteKilogram": 42.5,
+            "measurementMethod": 2,
+            "time": now.isoformat(),
+        },
+    )
+
+    result = ObservationPipeline().run_health_connect((("vo2-entity", payload),), now=now)
+
+    assert len(result.canonical) == 1
+    observation = result.canonical[0]
+    assert observation.metric == "vo2_max_ml_kg_min"
+    assert observation.value == 42.5
+    assert observation.unit == "ml/kg/min"
+    assert observation.metadata["measurement_method"] == 2
+    assert result.analytics["vo2_max_ml_kg_min"].latest_value == 42.5
