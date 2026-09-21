@@ -594,7 +594,7 @@ private fun InitialSetupSection(
     )
     OutlinedTextField(
         value = goalPriority,
-        onValueChange = { goalPriority = it.filter(Char::isDigit) },
+        onValueChange = { goalPriority = it.filter { char -> char.isDigit() } },
         label = { Text("Prioridade 1–5") },
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
@@ -663,7 +663,7 @@ private fun InitialSetupSection(
     )
     OutlinedTextField(
         value = availableMinutes,
-        onValueChange = { availableMinutes = it.filter(Char::isDigit) },
+        onValueChange = { availableMinutes = it.filter { char -> char.isDigit() } },
         label = { Text("Minutos disponíveis por sessão") },
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
@@ -692,7 +692,7 @@ private fun InitialSetupSection(
     ).forEach { (label, state) ->
         OutlinedTextField(
             value = state.first,
-            onValueChange = { value -> state.second(value.filter(Char::isDigit)) },
+            onValueChange = { value -> state.second(value.filter { char -> char.isDigit() }) },
             label = { Text("$label 1–5") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
@@ -728,11 +728,13 @@ private fun InitialSetupSection(
             if (
                 goalDescription.isBlank() ||
                 goalMetric.isBlank() ||
+                priority == null ||
                 priority !in 1..5 ||
                 space == null ||
+                minutes == null ||
                 minutes !in 15..240 ||
                 sleep == null ||
-                ratings.any { it !in 1..5 } ||
+                ratings.any { it == null || it !in 1..5 } ||
                 (goalBaseline.isNotBlank() && baseline == null) ||
                 (goalTarget.isNotBlank() && target == null) ||
                 !targetDateValid ||
