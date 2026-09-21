@@ -15,7 +15,7 @@ Selected encrypted Android relational store. It is the long-term replacement for
 Preferred FIT parser behind an adapter.
 
 ### `gpxpy`
-Production candidate for robust GPX parsing/manipulation. The included stdlib XML parser is intentionally minimal and exists only as a dependency-free reference/test adapter.
+Selected production GPX parser behind a hardened adapter. GPX input is pre-validated with `defusedxml`, size/point limits are enforced, and import IDs are deterministic.
 
 ## Reference / adapt by capability
 
@@ -73,4 +73,13 @@ Derived state can remain reproducible SQL/Python projections until scale require
 Research AI/Second Brain owns validated knowledge. Health OS stores evidence references and retrieves what it needs.
 
 ### Health Connect Medical Records / FHIR — FUTURE FEATURE-GATED ADAPTER
-Health Connect exposes experimental Personal Health Record APIs using HL7 FHIR R4/R4B, including medication, allergy, laboratory, condition, procedure, visit and vital-sign resources. Do not make this a hard dependency while the API and Play policy remain experimental. If enabled, preserve FHIR provenance/`meta.source`, request only the minimum permissions, and route medication data through the existing non-mutation safety rule.
+Health Connect Medical Records uses HL7 FHIR R4 (4.0.1) and R4B (4.3.0). Keep the compatibility boundary disabled by default while the production app stays on the stable Health Connect client and only enable it with explicit product/privacy approval. Preserve resource/source provenance and raw hashes, request minimum permissions, and route medication data through the existing non-mutation safety rule. Do not add hospital/EHR infrastructure merely to be FHIR-compatible.
+
+### Soda Core v4 — EVALUATE AS EXTERNAL ANALYTICS ADAPTER
+Do not embed Soda in the Health OS runtime. The current project only needs small contracts for derived analytical datasets, which are implemented internally and deterministically. Re-evaluate Soda when PostgreSQL/BigQuery analytical tables become numerous enough to justify an external data-contract engine. Soda must never replace health-safety or medical validation.
+
+### Pandera — RESERVE
+MIT-licensed and a better fit than a large data-quality platform if Health OS later standardizes on pandas/Polars DataFrames. Do not add it until dataframe-scale validation appears in the actual architecture.
+
+### Great Expectations / GX Core — DEFER
+Capable and mature, but broader than the current need. Revisit for a larger shared analytical platform; do not add it solely to validate a handful of Health OS aggregate tables.
