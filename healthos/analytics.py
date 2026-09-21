@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from statistics import mean
 from typing import cast
 
+from .data_quality import SourceResolver
 from .domain import (
     Observation,
     PerformedSession,
@@ -15,74 +16,6 @@ from .domain import (
     TrainingResponse,
 )
 from .engines import StrengthEngine
-
-
-@dataclass(frozen=True)
-class DeduplicationDecision:
-    selected: tuple[Observation, ...]
-    suppressed_ids: tuple[str, ...]
-
-
-class SourceResolver:
-    """Resolve overlapping wearable observations without deleting provenance.
-
-    The engine chooses one canonical observation for a metric/time bucket and returns
-    the suppressed IDs separately. Raw observations remain immutable in storage.
-    """
-
-    QUALITY_SCORE = {
-        "verified": 4,
-        "high": 3,
-        "medium": 2,
-        "low": 1,
-        "unknown": 0,
-    }
-
-    def __init__(self, source_priority: tuple[str, ...] = ()) -> None:
-        self._priority = {source_id: len(source_priority) - index for index, source_id in enumerate(source_priority)}
-
-    def _score(self, observation: Observation) -> tuple[int, int, float, datetime]:
-        return (
-            self._priority.get(observation.source_id, 0),
-            self.QUALITY_SCORE.get(observation.quality.lower(), 0),
-            observation.confidence if observation.confidence is not None else -1.0,
-            observation.recorded_at,
-        )
-
-    def deduplicate(
-        self,
-        observations: tuple[Observation, ...],
-        *,
-        tolerance: timedelta = timedelta(seconds=30),
-    ) -> DeduplicationDecision:
-        if tolerance.total_seconds() < 0:
-            raise ValueError("tolerance cannot be negative")
-        if not observations:
-            return DeduplicationDecision((), ())
-
-        ordered = sorted(observations, key=lambda x: (x.metric, x.observed_at, x.observation_id))
-        groups: list[list[Observation]] = []
-        for obs in ordered:
-            if not groups:
-                groups.append([obs])
-                continue
-            last_group = groups[-1]
-            anchor = last_group[0]
-            same_metric = obs.metric == anchor.metric
-            close_time = abs((obs.observed_at - anchor.observed_at).total_seconds()) <= tolerance.total_seconds()
-            if same_metric and close_time:
-                last_group.append(obs)
-            else:
-                groups.append([obs])
-
-        selected: list[Observation] = []
-        suppressed: list[str] = []
-        for group in groups:
-            winner = max(group, key=self._score)
-            selected.append(winner)
-            suppressed.extend(obs.observation_id for obs in group if obs.observation_id != winner.observation_id)
-
-        return DeduplicationDecision(tuple(selected), tuple(suppressed))
 
 
 @dataclass(frozen=True)
