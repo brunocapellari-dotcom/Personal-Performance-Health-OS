@@ -83,9 +83,9 @@ class HealthDataRepository(
     }
 
     suspend fun fullSync(mode: HealthIngestionMode = HealthIngestionMode.FOREGROUND): SyncSummary {
-        val hasCoreRead = healthConnect.hasCoreReadPermissions()
+        val hasAnyRead = healthConnect.hasAnyReadPermission()
         val backgroundAllowed = mode != HealthIngestionMode.BACKGROUND || healthConnect.hasBackgroundReadPermission()
-        val canIngestHealth = hasCoreRead && backgroundAllowed
+        val canIngestHealth = hasAnyRead && backgroundAllowed
         val staged = if (canIngestHealth) ingestHealthConnect() else 0
         val network = syncBackend()
         return network.copy(
@@ -95,11 +95,12 @@ class HealthDataRepository(
     }
 
     suspend fun ingestHealthConnect(): Int {
-        if (!healthConnect.hasCoreReadPermissions()) {
-            throw IllegalStateException("Health Connect core read permissions are incomplete")
+        val readableTypes = healthConnect.readableTypes()
+        if (readableTypes.isEmpty()) {
+            throw IllegalStateException("No Health Connect read permissions are granted")
         }
         var staged = 0
-        for (type in TrackedHealthType.entries) {
+        for (type in readableTypes.sortedBy { it.wireName }) {
             staged += syncHealthType(type)
         }
         return staged
