@@ -29,23 +29,29 @@ import org.json.JSONObject
 import java.time.Instant
 import kotlin.reflect.KClass
 
+enum class HealthMetricTier {
+    CORE,
+    PERFORMANCE,
+}
+
 enum class TrackedHealthType(
     val wireName: String,
     val recordClass: KClass<out Record>,
+    val tier: HealthMetricTier,
 ) {
-    STEPS("steps", StepsRecord::class),
-    STEPS_CADENCE("steps_cadence", StepsCadenceRecord::class),
-    HEART_RATE("heart_rate", HeartRateRecord::class),
-    RESTING_HEART_RATE("resting_heart_rate", RestingHeartRateRecord::class),
-    WEIGHT("weight", WeightRecord::class),
-    SLEEP("sleep", SleepSessionRecord::class),
-    EXERCISE("exercise", ExerciseSessionRecord::class),
-    DISTANCE("distance", DistanceRecord::class),
-    SPEED("speed", SpeedRecord::class),
-    ELEVATION_GAINED("elevation_gained", ElevationGainedRecord::class),
-    POWER("power", PowerRecord::class),
-    ACTIVE_CALORIES("active_calories", ActiveCaloriesBurnedRecord::class),
-    TOTAL_CALORIES("total_calories", TotalCaloriesBurnedRecord::class),
+    STEPS("steps", StepsRecord::class, HealthMetricTier.CORE),
+    HEART_RATE("heart_rate", HeartRateRecord::class, HealthMetricTier.CORE),
+    RESTING_HEART_RATE("resting_heart_rate", RestingHeartRateRecord::class, HealthMetricTier.CORE),
+    WEIGHT("weight", WeightRecord::class, HealthMetricTier.CORE),
+    SLEEP("sleep", SleepSessionRecord::class, HealthMetricTier.CORE),
+    EXERCISE("exercise", ExerciseSessionRecord::class, HealthMetricTier.CORE),
+    DISTANCE("distance", DistanceRecord::class, HealthMetricTier.CORE),
+    TOTAL_CALORIES("total_calories", TotalCaloriesBurnedRecord::class, HealthMetricTier.CORE),
+    ACTIVE_CALORIES("active_calories", ActiveCaloriesBurnedRecord::class, HealthMetricTier.PERFORMANCE),
+    STEPS_CADENCE("steps_cadence", StepsCadenceRecord::class, HealthMetricTier.PERFORMANCE),
+    SPEED("speed", SpeedRecord::class, HealthMetricTier.PERFORMANCE),
+    ELEVATION_GAINED("elevation_gained", ElevationGainedRecord::class, HealthMetricTier.PERFORMANCE),
+    POWER("power", PowerRecord::class, HealthMetricTier.PERFORMANCE),
 }
 
 data class HealthDelta(
@@ -90,6 +96,8 @@ class HealthConnectTokenExpiredException : IllegalStateException("Health Connect
 
 interface HealthConnectPort {
     suspend fun hasCoreReadPermissions(): Boolean
+    suspend fun hasAnyReadPermission(): Boolean
+    suspend fun readableTypes(): Set<TrackedHealthType>
     suspend fun hasBackgroundReadPermission(): Boolean
     suspend fun hasHistoryReadPermission(): Boolean
     suspend fun newToken(type: TrackedHealthType): String
@@ -109,13 +117,20 @@ class HealthConnectGateway private constructor(
         if (context != null) HealthConnectClient.getSdkStatus(context) else HealthConnectClient.SDK_AVAILABLE
 
     fun readPermissions(): Set<String> = TrackedHealthType.entries
+        .filter { it.tier == HealthMetricTier.CORE }
         .mapTo(mutableSetOf()) { HealthPermission.getReadPermission(it.recordClass) }
+
+    fun performanceReadPermissions(): Set<String> = TrackedHealthType.entries
+        .filter { it.tier == HealthMetricTier.PERFORMANCE }
+        .mapTo(mutableSetOf()) { HealthPermission.getReadPermission(it.recordClass) }
+
+    fun allReadPermissions(): Set<String> = readPermissions() + performanceReadPermissions()
 
     fun backgroundReadPermission(): String = HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND
 
     fun historyReadPermission(): String = HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY
 
-    fun extendedReadPermissions(): Set<String> = readPermissions() + setOf(
+    fun extendedReadPermissions(): Set<String> = allReadPermissions() + setOf(
         backgroundReadPermission(),
         historyReadPermission(),
     )
@@ -126,6 +141,20 @@ class HealthConnectGateway private constructor(
         grantedPermissions().containsAll(permissions)
 
     override suspend fun hasCoreReadPermissions(): Boolean = hasPermissions(readPermissions())
+
+    override suspend fun hasAnyReadPermission(): Boolean {
+        val granted = grantedPermissions()
+        return TrackedHealthType.entries.any {
+            granted.contains(HealthPermission.getReadPermission(it.recordClass))
+        }
+    }
+
+    override suspend fun readableTypes(): Set<TrackedHealthType> {
+        val granted = grantedPermissions()
+        return TrackedHealthType.entries.filterTo(mutableSetOf()) {
+            granted.contains(HealthPermission.getReadPermission(it.recordClass))
+        }
+    }
 
     override suspend fun hasBackgroundReadPermission(): Boolean =
         grantedPermissions().contains(backgroundReadPermission())
