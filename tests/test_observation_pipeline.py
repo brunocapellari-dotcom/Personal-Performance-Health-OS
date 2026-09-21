@@ -184,3 +184,41 @@ def test_vo2_max_is_normalized_with_measurement_method() -> None:
     assert observation.unit == "ml/kg/min"
     assert observation.metadata["measurement_method"] == 2
     assert result.analytics["vo2_max_ml_kg_min"].latest_value == 42.5
+
+
+def test_newer_source_record_version_wins_before_normalization() -> None:
+    now = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
+    older = HealthObservationPayload(
+        record_type="weight",
+        source_record_id="same-record",
+        observed_at_epoch_ms=int(now.timestamp() * 1000),
+        data_origin_package="com.synthetic.scale",
+        last_modified_at_epoch_ms=int((now - timedelta(minutes=5)).timestamp() * 1000),
+        client_record_id="weight-client",
+        client_record_version=1,
+        recording_method=2,
+        health_connect_deleted=False,
+        data={"kilograms": 101.0, "time": now.isoformat()},
+    )
+    newer = HealthObservationPayload(
+        record_type="weight",
+        source_record_id="same-record",
+        observed_at_epoch_ms=int(now.timestamp() * 1000),
+        data_origin_package="com.synthetic.scale",
+        last_modified_at_epoch_ms=int(now.timestamp() * 1000),
+        client_record_id="weight-client",
+        client_record_version=2,
+        recording_method=2,
+        health_connect_deleted=False,
+        data={"kilograms": 100.5, "time": now.isoformat()},
+    )
+
+    result = ObservationPipeline().run_health_connect(
+        (("old-entity", older), ("new-entity", newer)),
+        now=now,
+    )
+
+    assert result.raw_count == 2
+    assert result.normalized_count == 1
+    assert result.canonical[0].value == 100.5
+    assert result.source_version_suppressed_ids == ("old-entity",)
