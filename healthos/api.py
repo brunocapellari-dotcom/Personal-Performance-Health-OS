@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from dataclasses import asdict
 from typing import Annotated
 from uuid import uuid4
@@ -318,7 +319,16 @@ def create_app(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
         resolver = PlanningStateResolver()
-        synced_goals = resolver.goals(db)
+        planning_now = datetime(
+            payload.today.year,
+            payload.today.month,
+            payload.today.day,
+            23,
+            59,
+            59,
+            tzinfo=UTC,
+        )
+        synced_goals = resolver.goals(db, now=planning_now)
         synced_environment = resolver.environment(db)
         synced_readiness = resolver.readiness(db)
 
@@ -478,6 +488,40 @@ def create_app(
         )
         db.flush()
         return NextBlockResponse(snapshot_id=snapshot.snapshot_id, plan=plan_json, audit=audit_json)
+
+    @app.get("/v1/observations/summary")
+    def observations_summary(db: DbSession, actor: Actor) -> dict[str, object]:
+        del actor
+        pipeline = PlanningStateResolver().health_pipeline(db)
+        if pipeline is None:
+            return {
+                "raw_count": 0,
+                "normalized_count": 0,
+                "canonical_count": 0,
+                "suppressed_ids": [],
+                "quality_findings": [],
+                "missing_findings": [],
+                "baselines": {},
+                "analytics": {},
+            }
+        return jsonable_encoder(
+            {
+                "raw_count": pipeline.raw_count,
+                "normalized_count": pipeline.normalized_count,
+                "canonical_count": len(pipeline.canonical),
+                "suppressed_ids": pipeline.suppressed_ids,
+                "quality_findings": [asdict(item) for item in pipeline.quality_findings],
+                "missing_findings": [asdict(item) for item in pipeline.missing_findings],
+                "baselines": {
+                    metric: asdict(value)
+                    for metric, value in sorted(pipeline.baselines.items())
+                },
+                "analytics": {
+                    metric: asdict(value)
+                    for metric, value in sorted(pipeline.analytics.items())
+                },
+            }
+        )
 
     @app.get("/v1/audit/verify")
     def audit_verify(db: DbSession, actor: Actor) -> dict[str, bool]:
