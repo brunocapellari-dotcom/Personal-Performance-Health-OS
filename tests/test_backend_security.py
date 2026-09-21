@@ -10,7 +10,9 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from healthos.auth import (
     authenticate_active_token,
     authenticate_token,
+    consume_pairing_token,
     create_challenge,
+    create_pairing_token,
     enroll_device,
     issue_access_token,
     require_owner,
@@ -108,3 +110,54 @@ def test_encrypted_blob_store_roundtrip_and_tamper_detection(tmp_path) -> None:
     assert store.get(ref.blob_id, media_type="image/jpeg") == b"private-health-photo"
     with pytest.raises(InvalidTag):
         store.get(ref.blob_id, media_type="image/png")
+
+
+def test_pairing_token_is_short_lived_role_bound_and_single_use() -> None:
+    settings = _settings()
+    database = Database(settings)
+    database.create_schema_for_tests(settings)
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_pem = private_key.public_key().public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("utf-8")
+
+    with database.session() as db:
+        enroll_device(db, device_id="owner-pairing", public_key_pem=public_pem, role="owner_device")
+        token, expires_at = create_pairing_token(
+            db,
+            issued_by_device_id="owner-pairing",
+            role="owner_device",
+            ttl_seconds=300,
+        )
+        assert expires_at is not None
+        with pytest.raises(ValueError, match="role"):
+            consume_pairing_token(db, token=token, requested_role="readonly")
+        record = consume_pairing_token(db, token=token, requested_role="owner_device")
+        assert record.used_at is not None
+        with pytest.raises(ValueError, match="expired or already used"):
+            consume_pairing_token(db, token=token, requested_role="owner_device")
+
+
+def test_pairing_token_fails_if_issuing_owner_is_disabled() -> None:
+    settings = _settings()
+    database = Database(settings)
+    database.create_schema_for_tests(settings)
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_pem = private_key.public_key().public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("utf-8")
+
+    with database.session() as db:
+        owner = enroll_device(db, device_id="owner-disabled", public_key_pem=public_pem, role="owner_device")
+        token, _ = create_pairing_token(
+            db,
+            issued_by_device_id="owner-disabled",
+            role="owner_device",
+            ttl_seconds=300,
+        )
+        owner.enabled = False
+        db.flush()
+        with pytest.raises(ValueError, match="issuer"):
+            consume_pairing_token(db, token=token, requested_role="owner_device")
