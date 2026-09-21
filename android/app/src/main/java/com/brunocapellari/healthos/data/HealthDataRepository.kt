@@ -166,7 +166,7 @@ class HealthDataRepository(
 
         val now = Instant.now()
         val logicalClock = now.toEpochMilli().coerceAtLeast(1)
-        val goalId = UUID.randomUUID().toString()
+        val goalId = "primary-goal"
         val goal = JSONObject()
             .put("goal_id", goalId)
             .put("description", goalDescription.trim())
