@@ -10,6 +10,12 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .analytic_contracts import (
+    AnalyticContractValidator,
+    ContractReport,
+    OBSERVATION_ANALYTICS_CONTRACT,
+    OBSERVATION_BASELINE_CONTRACT,
+)
 from .data_quality import (
     DataQualityEngine,
     DataQualityFinding,
@@ -61,6 +67,8 @@ class ObservationPipelineResult:
     missing_findings: tuple[MissingDataFinding, ...]
     baselines: dict[str, BaselineMetric]
     analytics: dict[str, MetricAnalytics]
+    baseline_contract: ContractReport
+    analytics_contract: ContractReport
 
 
 PLAUSIBLE_RANGES: dict[str, tuple[float, float]] = {
@@ -493,6 +501,32 @@ class ObservationPipeline:
         dedup = resolver.deduplicate(tuple(accepted))
         canonical = tuple(sorted(dedup.selected, key=lambda item: (item.observed_at, item.metric, item.observation_id)))
         missing = self.missing.detect(canonical, expectations, now=now)
+        baselines = self.baselines.calculate(canonical, now=now)
+        analytics = self.analytics.summarize(canonical)
+        contract_validator = AnalyticContractValidator()
+        baseline_rows = tuple(
+            {
+                "metric": metric,
+                "value": item.value,
+                "sample_count": item.sample_count,
+                "day_count": item.day_count,
+                "confidence": item.confidence,
+                "method": item.method,
+            }
+            for metric, item in sorted(baselines.items())
+        )
+        analytics_rows = tuple(
+            {
+                "metric": metric,
+                "count": item.count,
+                "latest_value": item.latest_value,
+                "mean_value": item.mean_value,
+                "median_value": item.median_value,
+                "min_value": item.min_value,
+                "max_value": item.max_value,
+            }
+            for metric, item in sorted(analytics.items())
+        )
         return ObservationPipelineResult(
             raw_count=len(observations) if raw_count is None else raw_count,
             normalized_count=len(observations),
@@ -500,8 +534,10 @@ class ObservationPipeline:
             suppressed_ids=dedup.suppressed_ids,
             quality_findings=report.findings,
             missing_findings=missing,
-            baselines=self.baselines.calculate(canonical, now=now),
-            analytics=self.analytics.summarize(canonical),
+            baselines=baselines,
+            analytics=analytics,
+            baseline_contract=contract_validator.validate(baseline_rows, OBSERVATION_BASELINE_CONTRACT),
+            analytics_contract=contract_validator.validate(analytics_rows, OBSERVATION_ANALYTICS_CONTRACT),
         )
 
 
