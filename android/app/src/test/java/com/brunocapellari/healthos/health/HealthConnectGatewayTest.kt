@@ -1,17 +1,21 @@
 package com.brunocapellari.healthos.health
 
+import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.SpeedRecord
 import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.metadata.Metadata
 import androidx.health.connect.client.testing.FakeHealthConnectClient
 import androidx.health.connect.client.testing.FakePermissionController
+import androidx.health.connect.client.testing.AggregationResult
+import androidx.health.connect.client.testing.stubs.stub
 import androidx.health.connect.client.units.Velocity
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Duration
 import java.time.Instant
 
 class HealthConnectGatewayTest {
@@ -148,5 +152,50 @@ class HealthConnectGatewayTest {
         assertTrue(gateway.hasAnyReadPermission())
         assertFalse(gateway.hasCoreReadPermissions())
         assertEquals(setOf(TrackedHealthType.SPEED), gateway.readableTypes())
+    }
+
+
+    @Test
+    fun exerciseAggregateUsesOnlyAuthorizedMetricOutputs() = runBlocking {
+        val permissions = FakePermissionController(grantAll = false)
+        permissions.grantPermissions(
+            setOf(
+                HealthPermission.getReadPermission(ExerciseSessionRecord::class),
+                HealthPermission.getReadPermission(StepsRecord::class),
+            ),
+        )
+        val fake = FakeHealthConnectClient(permissionController = permissions)
+        val gateway = HealthConnectGateway(fake)
+        val start = Instant.parse("2027-03-01T10:00:00Z")
+        val end = Instant.parse("2027-03-01T10:30:00Z")
+        val inserted = fake.insertRecords(
+            listOf(
+                ExerciseSessionRecord(
+                    startTime = start,
+                    startZoneOffset = null,
+                    endTime = end,
+                    endZoneOffset = null,
+                    exerciseType = ExerciseSessionRecord.EXERCISE_TYPE_RUNNING,
+                    metadata = Metadata.manualEntry(),
+                ),
+            ),
+        )
+        fake.overrides.aggregate = stub(
+            AggregationResult(
+                metrics = buildMap {
+                    put(ExerciseSessionRecord.EXERCISE_DURATION_TOTAL, Duration.ofMinutes(30))
+                    put(StepsRecord.COUNT_TOTAL, 3200L)
+                    put(SpeedRecord.SPEED_AVG, Velocity.metersPerSecond(5.0))
+                },
+            ),
+        )
+
+        val aggregate = gateway.aggregateExerciseSession(inserted.recordIdsList.single())
+
+        assertEquals(1800L, aggregate.durationSeconds)
+        assertEquals(3200L, aggregate.steps)
+        assertEquals(null, aggregate.avgSpeedMetersPerSecond)
+        assertEquals(null, aggregate.avgPowerWatts)
+        assertEquals(null, aggregate.activeCaloriesKcal)
     }
 }
