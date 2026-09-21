@@ -5,14 +5,21 @@ import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.changes.DeletionChange
 import androidx.health.connect.client.changes.UpsertionChange
 import androidx.health.connect.client.permission.HealthPermission
+import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
 import androidx.health.connect.client.records.DistanceRecord
+import androidx.health.connect.client.records.ElevationGainedRecord
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.HeartRateRecord
+import androidx.health.connect.client.records.PowerRecord
 import androidx.health.connect.client.records.Record
+import androidx.health.connect.client.records.RestingHeartRateRecord
 import androidx.health.connect.client.records.SleepSessionRecord
+import androidx.health.connect.client.records.SpeedRecord
+import androidx.health.connect.client.records.StepsCadenceRecord
 import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
 import androidx.health.connect.client.records.WeightRecord
+import androidx.health.connect.client.records.metadata.Metadata
 import androidx.health.connect.client.request.ChangesTokenRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
@@ -26,11 +33,17 @@ enum class TrackedHealthType(
     val recordClass: KClass<out Record>,
 ) {
     STEPS("steps", StepsRecord::class),
+    STEPS_CADENCE("steps_cadence", StepsCadenceRecord::class),
     HEART_RATE("heart_rate", HeartRateRecord::class),
+    RESTING_HEART_RATE("resting_heart_rate", RestingHeartRateRecord::class),
     WEIGHT("weight", WeightRecord::class),
     SLEEP("sleep", SleepSessionRecord::class),
     EXERCISE("exercise", ExerciseSessionRecord::class),
     DISTANCE("distance", DistanceRecord::class),
+    SPEED("speed", SpeedRecord::class),
+    ELEVATION_GAINED("elevation_gained", ElevationGainedRecord::class),
+    POWER("power", PowerRecord::class),
+    ACTIVE_CALORIES("active_calories", ActiveCaloriesBurnedRecord::class),
     TOTAL_CALORIES("total_calories", TotalCaloriesBurnedRecord::class),
 }
 
@@ -39,6 +52,13 @@ data class HealthDelta(
     val recordId: String,
     val observedAtEpochMillis: Long,
     val dataOriginPackage: String,
+    val lastModifiedAtEpochMillis: Long,
+    val clientRecordId: String?,
+    val clientRecordVersion: Long,
+    val recordingMethod: Int,
+    val deviceType: Int?,
+    val deviceManufacturer: String?,
+    val deviceModel: String?,
     val payloadJson: String,
     val deleted: Boolean,
 )
@@ -67,7 +87,8 @@ class HealthConnectGateway private constructor(
 
     internal constructor(client: HealthConnectClient) : this(null, client)
 
-    fun sdkStatus(): Int = if (context != null) HealthConnectClient.getSdkStatus(context) else HealthConnectClient.SDK_AVAILABLE
+    fun sdkStatus(): Int =
+        if (context != null) HealthConnectClient.getSdkStatus(context) else HealthConnectClient.SDK_AVAILABLE
 
     fun readPermissions(): Set<String> = TrackedHealthType.entries
         .mapTo(mutableSetOf()) { HealthPermission.getReadPermission(it.recordClass) }
@@ -88,9 +109,11 @@ class HealthConnectGateway private constructor(
 
     override suspend fun hasCoreReadPermissions(): Boolean = hasPermissions(readPermissions())
 
-    override suspend fun hasBackgroundReadPermission(): Boolean = grantedPermissions().contains(backgroundReadPermission())
+    override suspend fun hasBackgroundReadPermission(): Boolean =
+        grantedPermissions().contains(backgroundReadPermission())
 
-    override suspend fun hasHistoryReadPermission(): Boolean = grantedPermissions().contains(historyReadPermission())
+    override suspend fun hasHistoryReadPermission(): Boolean =
+        grantedPermissions().contains(historyReadPermission())
 
     override suspend fun newToken(type: TrackedHealthType): String = client.getChangesToken(
         ChangesTokenRequest(recordTypes = setOf(type.recordClass)),
@@ -102,12 +125,23 @@ class HealthConnectGateway private constructor(
         end: Instant,
     ): List<HealthDelta> = when (type) {
         TrackedHealthType.STEPS -> readAll(StepsRecord::class, start, end).map { normalize(type, it) }
+        TrackedHealthType.STEPS_CADENCE ->
+            readAll(StepsCadenceRecord::class, start, end).map { normalize(type, it) }
         TrackedHealthType.HEART_RATE -> readAll(HeartRateRecord::class, start, end).map { normalize(type, it) }
+        TrackedHealthType.RESTING_HEART_RATE ->
+            readAll(RestingHeartRateRecord::class, start, end).map { normalize(type, it) }
         TrackedHealthType.WEIGHT -> readAll(WeightRecord::class, start, end).map { normalize(type, it) }
         TrackedHealthType.SLEEP -> readAll(SleepSessionRecord::class, start, end).map { normalize(type, it) }
         TrackedHealthType.EXERCISE -> readAll(ExerciseSessionRecord::class, start, end).map { normalize(type, it) }
         TrackedHealthType.DISTANCE -> readAll(DistanceRecord::class, start, end).map { normalize(type, it) }
-        TrackedHealthType.TOTAL_CALORIES -> readAll(TotalCaloriesBurnedRecord::class, start, end).map { normalize(type, it) }
+        TrackedHealthType.SPEED -> readAll(SpeedRecord::class, start, end).map { normalize(type, it) }
+        TrackedHealthType.ELEVATION_GAINED ->
+            readAll(ElevationGainedRecord::class, start, end).map { normalize(type, it) }
+        TrackedHealthType.POWER -> readAll(PowerRecord::class, start, end).map { normalize(type, it) }
+        TrackedHealthType.ACTIVE_CALORIES ->
+            readAll(ActiveCaloriesBurnedRecord::class, start, end).map { normalize(type, it) }
+        TrackedHealthType.TOTAL_CALORIES ->
+            readAll(TotalCaloriesBurnedRecord::class, start, end).map { normalize(type, it) }
     }
 
     override suspend fun drain(type: TrackedHealthType, token: String): ChangeBatch {
@@ -124,6 +158,13 @@ class HealthConnectGateway private constructor(
                         recordId = change.recordId,
                         observedAtEpochMillis = System.currentTimeMillis(),
                         dataOriginPackage = "health-connect",
+                        lastModifiedAtEpochMillis = System.currentTimeMillis(),
+                        clientRecordId = null,
+                        clientRecordVersion = 0,
+                        recordingMethod = Metadata.RECORDING_METHOD_UNKNOWN,
+                        deviceType = null,
+                        deviceManufacturer = null,
+                        deviceModel = null,
                         payloadJson = "{}",
                         deleted = true,
                     )
@@ -160,6 +201,19 @@ class HealthConnectGateway private constructor(
                 payload.put("endTime", record.endTime.toString())
                 record.endTime.toEpochMilli()
             }
+            is StepsCadenceRecord -> {
+                payload.put("startTime", record.startTime.toString())
+                payload.put("endTime", record.endTime.toString())
+                payload.put(
+                    "samples",
+                    JSONArray().apply {
+                        record.samples.forEach { sample ->
+                            put(JSONObject().put("time", sample.time.toString()).put("stepsPerMinute", sample.rate))
+                        }
+                    },
+                )
+                record.endTime.toEpochMilli()
+            }
             is HeartRateRecord -> {
                 payload.put("startTime", record.startTime.toString())
                 payload.put("endTime", record.endTime.toString())
@@ -173,6 +227,11 @@ class HealthConnectGateway private constructor(
                 )
                 record.endTime.toEpochMilli()
             }
+            is RestingHeartRateRecord -> {
+                payload.put("bpm", record.beatsPerMinute)
+                payload.put("time", record.time.toString())
+                record.time.toEpochMilli()
+            }
             is WeightRecord -> {
                 payload.put("kilograms", record.weight.inKilograms)
                 payload.put("time", record.time.toString())
@@ -183,6 +242,19 @@ class HealthConnectGateway private constructor(
                 payload.put("endTime", record.endTime.toString())
                 payload.put("title", record.title)
                 payload.put("notes", record.notes)
+                payload.put(
+                    "stages",
+                    JSONArray().apply {
+                        record.stages.forEach { stage ->
+                            put(
+                                JSONObject()
+                                    .put("stage", stage.stage)
+                                    .put("startTime", stage.startTime.toString())
+                                    .put("endTime", stage.endTime.toString()),
+                            )
+                        }
+                    },
+                )
                 record.endTime.toEpochMilli()
             }
             is ExerciseSessionRecord -> {
@@ -198,6 +270,48 @@ class HealthConnectGateway private constructor(
                 payload.put("endTime", record.endTime.toString())
                 record.endTime.toEpochMilli()
             }
+            is SpeedRecord -> {
+                payload.put("startTime", record.startTime.toString())
+                payload.put("endTime", record.endTime.toString())
+                payload.put(
+                    "samples",
+                    JSONArray().apply {
+                        record.samples.forEach { sample ->
+                            put(
+                                JSONObject()
+                                    .put("time", sample.time.toString())
+                                    .put("metersPerSecond", sample.speed.inMetersPerSecond),
+                            )
+                        }
+                    },
+                )
+                record.endTime.toEpochMilli()
+            }
+            is ElevationGainedRecord -> {
+                payload.put("meters", record.elevation.inMeters)
+                payload.put("startTime", record.startTime.toString())
+                payload.put("endTime", record.endTime.toString())
+                record.endTime.toEpochMilli()
+            }
+            is PowerRecord -> {
+                payload.put("startTime", record.startTime.toString())
+                payload.put("endTime", record.endTime.toString())
+                payload.put(
+                    "samples",
+                    JSONArray().apply {
+                        record.samples.forEach { sample ->
+                            put(JSONObject().put("time", sample.time.toString()).put("watts", sample.power.inWatts))
+                        }
+                    },
+                )
+                record.endTime.toEpochMilli()
+            }
+            is ActiveCaloriesBurnedRecord -> {
+                payload.put("kilocalories", record.energy.inKilocalories)
+                payload.put("startTime", record.startTime.toString())
+                payload.put("endTime", record.endTime.toString())
+                record.endTime.toEpochMilli()
+            }
             is TotalCaloriesBurnedRecord -> {
                 payload.put("kilocalories", record.energy.inKilocalories)
                 payload.put("startTime", record.startTime.toString())
@@ -206,13 +320,31 @@ class HealthConnectGateway private constructor(
             }
             else -> throw IllegalArgumentException("Unsupported Health Connect record: ${record::class}")
         }
+        payload.put("_provenance", provenance(record.metadata))
+        val metadata = record.metadata
         return HealthDelta(
             recordType = type,
-            recordId = record.metadata.id,
+            recordId = metadata.id,
             observedAtEpochMillis = observedAt,
-            dataOriginPackage = record.metadata.dataOrigin.packageName,
+            dataOriginPackage = metadata.dataOrigin.packageName,
+            lastModifiedAtEpochMillis = metadata.lastModifiedTime.toEpochMilli(),
+            clientRecordId = metadata.clientRecordId,
+            clientRecordVersion = metadata.clientRecordVersion,
+            recordingMethod = metadata.recordingMethod,
+            deviceType = metadata.device?.type,
+            deviceManufacturer = metadata.device?.manufacturer,
+            deviceModel = metadata.device?.model,
             payloadJson = payload.toString(),
             deleted = false,
         )
     }
-}
+
+    private fun provenance(metadata: Metadata): JSONObject = JSONObject()
+        .put("dataOriginPackage", metadata.dataOrigin.packageName)
+        .put("lastModifiedTime", metadata.lastModifiedTime.toString())
+        .put("clientRecordId", metadata.clientRecordId ?: JSONObject.NULL)
+        .put("clientRecordVersion", metadata.clientRecordVersion)
+        .put("recordingMethod", metadata.recordingMethod)
+        .put("deviceType", metadata.device?.type ?: JSONObject.NULL)
+        .put("deviceManufacturer", metadata.device?.manufacturer ?: JSONObject.NULL)
+        .put("deviceModel", metadata.device?.model ?: JSONObject.NULL)
