@@ -189,3 +189,68 @@ def test_canonical_state_resolves_assessment_calendar_and_performed_history() ->
     assert state.training_response.load_ratio == 0.5
     assert state.strength_progressions["goblet_squat"].next_load_kg == 22.0
     assert state.strength_progressions["goblet_squat"].rationale == "double_progression_increment"
+
+
+def test_goal_current_falls_back_to_health_connect_baseline() -> None:
+    settings = _settings()
+    database = Database(settings)
+    database.create_schema_for_tests(settings)
+    observed = datetime(2026, 9, 20, 7, 0, tzinfo=UTC)
+
+    with database.session() as db:
+        push_changes(
+            db,
+            settings,
+            device_id="synthetic-device",
+            changes=(
+                IncomingChange(
+                    "goal-weight-change",
+                    "goal",
+                    "goal-weight",
+                    1,
+                    False,
+                    {
+                        "goal_id": "goal-weight",
+                        "description": "Synthetic weight goal",
+                        "priority": 3,
+                        "baseline": 110.0,
+                        "target": 95.0,
+                        "metric": "weight_kg",
+                        "constraints": [],
+                    },
+                ),
+                IncomingChange(
+                    "weight-observation-change",
+                    "observation",
+                    "weight-observation-entity",
+                    1,
+                    False,
+                    {
+                        "record_type": "weight",
+                        "source_record_id": "weight-1",
+                        "observed_at_epoch_ms": int(observed.timestamp() * 1000),
+                        "data_origin_package": "com.synthetic.scale",
+                        "last_modified_at_epoch_ms": int(observed.timestamp() * 1000),
+                        "client_record_id": "scale-weight-1",
+                        "client_record_version": 1,
+                        "recording_method": 2,
+                        "device_type": 1,
+                        "device_manufacturer": "Synthetic",
+                        "device_model": "Scale-X",
+                        "health_connect_deleted": False,
+                        "data": {
+                            "kilograms": 101.5,
+                            "time": observed.isoformat(),
+                        },
+                    },
+                ),
+            ),
+        )
+
+    with database.session() as db:
+        goals = PlanningStateResolver().goals(
+            db,
+            now=datetime(2026, 9, 21, 23, 59, tzinfo=UTC),
+        )
+
+    assert goals[0].current == 101.5
