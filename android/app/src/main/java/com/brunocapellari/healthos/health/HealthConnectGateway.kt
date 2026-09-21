@@ -8,10 +8,16 @@ import androidx.health.connect.client.changes.UpsertionChange
 import androidx.health.connect.client.request.AggregateRequest
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
+import androidx.health.connect.client.records.BodyFatRecord
+import androidx.health.connect.client.records.CyclingPedalingCadenceRecord
 import androidx.health.connect.client.records.DistanceRecord
 import androidx.health.connect.client.records.ElevationGainedRecord
 import androidx.health.connect.client.records.ExerciseSessionRecord
+import androidx.health.connect.client.records.FloorsClimbedRecord
 import androidx.health.connect.client.records.HeartRateRecord
+import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
+import androidx.health.connect.client.records.HydrationRecord
+import androidx.health.connect.client.records.LeanBodyMassRecord
 import androidx.health.connect.client.records.PowerRecord
 import androidx.health.connect.client.records.Record
 import androidx.health.connect.client.records.RestingHeartRateRecord
@@ -34,6 +40,8 @@ import kotlin.reflect.KClass
 enum class HealthMetricTier {
     CORE,
     PERFORMANCE,
+    BODY_COMPOSITION,
+    NUTRITION,
 }
 
 enum class TrackedHealthType(
@@ -55,6 +63,20 @@ enum class TrackedHealthType(
     ELEVATION_GAINED("elevation_gained", ElevationGainedRecord::class, HealthMetricTier.PERFORMANCE),
     POWER("power", PowerRecord::class, HealthMetricTier.PERFORMANCE),
     VO2_MAX("vo2_max", Vo2MaxRecord::class, HealthMetricTier.PERFORMANCE),
+    HEART_RATE_VARIABILITY(
+        "heart_rate_variability_rmssd",
+        HeartRateVariabilityRmssdRecord::class,
+        HealthMetricTier.PERFORMANCE,
+    ),
+    CYCLING_CADENCE(
+        "cycling_pedaling_cadence",
+        CyclingPedalingCadenceRecord::class,
+        HealthMetricTier.PERFORMANCE,
+    ),
+    FLOORS_CLIMBED("floors_climbed", FloorsClimbedRecord::class, HealthMetricTier.PERFORMANCE),
+    BODY_FAT("body_fat", BodyFatRecord::class, HealthMetricTier.BODY_COMPOSITION),
+    LEAN_BODY_MASS("lean_body_mass", LeanBodyMassRecord::class, HealthMetricTier.BODY_COMPOSITION),
+    HYDRATION("hydration", HydrationRecord::class, HealthMetricTier.NUTRITION),
 }
 
 data class HealthDelta(
@@ -123,17 +145,24 @@ class HealthConnectGateway private constructor(
         .filter { it.tier == HealthMetricTier.CORE }
         .mapTo(mutableSetOf()) { HealthPermission.getReadPermission(it.recordClass) }
 
-    fun performanceReadPermissions(): Set<String> = TrackedHealthType.entries
-        .filter { it.tier == HealthMetricTier.PERFORMANCE }
+    fun performanceReadPermissions(): Set<String> = permissionsForTier(HealthMetricTier.PERFORMANCE)
+
+    fun bodyCompositionReadPermissions(): Set<String> = permissionsForTier(HealthMetricTier.BODY_COMPOSITION)
+
+    fun nutritionReadPermissions(): Set<String> = permissionsForTier(HealthMetricTier.NUTRITION)
+
+    private fun permissionsForTier(tier: HealthMetricTier): Set<String> = TrackedHealthType.entries
+        .filter { it.tier == tier }
         .mapTo(mutableSetOf()) { HealthPermission.getReadPermission(it.recordClass) }
 
-    fun allReadPermissions(): Set<String> = readPermissions() + performanceReadPermissions()
+    fun allReadPermissions(): Set<String> =
+        readPermissions() + performanceReadPermissions() + bodyCompositionReadPermissions() + nutritionReadPermissions()
 
     fun backgroundReadPermission(): String = HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND
 
     fun historyReadPermission(): String = HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY
 
-    fun extendedReadPermissions(): Set<String> = allReadPermissions() + setOf(
+    fun extendedReadPermissions(): Set<String> = setOf(
         backgroundReadPermission(),
         historyReadPermission(),
     )
@@ -189,6 +218,16 @@ class HealthConnectGateway private constructor(
             readAll(ElevationGainedRecord::class, start, end).map { normalize(type, it) }
         TrackedHealthType.POWER -> readAll(PowerRecord::class, start, end).map { normalize(type, it) }
         TrackedHealthType.VO2_MAX -> readAll(Vo2MaxRecord::class, start, end).map { normalize(type, it) }
+        TrackedHealthType.HEART_RATE_VARIABILITY ->
+            readAll(HeartRateVariabilityRmssdRecord::class, start, end).map { normalize(type, it) }
+        TrackedHealthType.CYCLING_CADENCE ->
+            readAll(CyclingPedalingCadenceRecord::class, start, end).map { normalize(type, it) }
+        TrackedHealthType.FLOORS_CLIMBED ->
+            readAll(FloorsClimbedRecord::class, start, end).map { normalize(type, it) }
+        TrackedHealthType.BODY_FAT -> readAll(BodyFatRecord::class, start, end).map { normalize(type, it) }
+        TrackedHealthType.LEAN_BODY_MASS ->
+            readAll(LeanBodyMassRecord::class, start, end).map { normalize(type, it) }
+        TrackedHealthType.HYDRATION -> readAll(HydrationRecord::class, start, end).map { normalize(type, it) }
         TrackedHealthType.ACTIVE_CALORIES ->
             readAll(ActiveCaloriesBurnedRecord::class, start, end).map { normalize(type, it) }
         TrackedHealthType.TOTAL_CALORIES ->
@@ -436,6 +475,50 @@ class HealthConnectGateway private constructor(
                 payload.put("measurementMethod", record.measurementMethod)
                 payload.put("time", record.time.toString())
                 record.time.toEpochMilli()
+            }
+            is HeartRateVariabilityRmssdRecord -> {
+                payload.put("rmssdMillis", record.heartRateVariabilityMillis)
+                payload.put("time", record.time.toString())
+                record.time.toEpochMilli()
+            }
+            is CyclingPedalingCadenceRecord -> {
+                payload.put("startTime", record.startTime.toString())
+                payload.put("endTime", record.endTime.toString())
+                payload.put(
+                    "samples",
+                    JSONArray().apply {
+                        record.samples.forEach { sample ->
+                            put(
+                                JSONObject()
+                                    .put("time", sample.time.toString())
+                                    .put("revolutionsPerMinute", sample.revolutionsPerMinute),
+                            )
+                        }
+                    },
+                )
+                record.endTime.toEpochMilli()
+            }
+            is FloorsClimbedRecord -> {
+                payload.put("floors", record.floors)
+                payload.put("startTime", record.startTime.toString())
+                payload.put("endTime", record.endTime.toString())
+                record.endTime.toEpochMilli()
+            }
+            is BodyFatRecord -> {
+                payload.put("percent", record.percentage.value)
+                payload.put("time", record.time.toString())
+                record.time.toEpochMilli()
+            }
+            is LeanBodyMassRecord -> {
+                payload.put("kilograms", record.mass.inKilograms)
+                payload.put("time", record.time.toString())
+                record.time.toEpochMilli()
+            }
+            is HydrationRecord -> {
+                payload.put("liters", record.volume.inLiters)
+                payload.put("startTime", record.startTime.toString())
+                payload.put("endTime", record.endTime.toString())
+                record.endTime.toEpochMilli()
             }
             is ActiveCaloriesBurnedRecord -> {
                 payload.put("kilocalories", record.energy.inKilocalories)
