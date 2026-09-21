@@ -177,6 +177,13 @@ class HealthObservationPayload(EntityPayload):
     source_record_id: str = Field(min_length=1, max_length=256)
     observed_at_epoch_ms: int = Field(ge=1)
     data_origin_package: str = Field(min_length=1, max_length=512)
+    last_modified_at_epoch_ms: int | None = Field(default=None, ge=0)
+    client_record_id: str | None = Field(default=None, max_length=512)
+    client_record_version: int = Field(default=0, ge=0)
+    recording_method: int = Field(default=0, ge=0, le=3)
+    device_type: int | None = Field(default=None, ge=0)
+    device_manufacturer: str | None = Field(default=None, max_length=256)
+    device_model: str | None = Field(default=None, max_length=256)
     health_connect_deleted: bool = False
     data: dict[str, Any] = Field(default_factory=dict)
 
