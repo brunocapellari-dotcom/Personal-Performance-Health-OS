@@ -49,13 +49,14 @@ FHIR compatibility is a disabled-by-default boundary supporting R4/R4B envelopes
 
 The canonical observation path is:
 
-`Health Connect → source identification → normalization → quality/confidence → duplicate resolution → timeline → missing-data detection → baseline → analytics`
+`Health Connect → source identification → source-version dedup → normalization → quality/confidence → cross-source duplicate resolution → timeline → missing-data detection → baseline → analytics`
 
 Rules:
 
 - source identity combines Health Connect DataOrigin with device metadata when available;
 - source priority is explicit persisted configuration, never a hard-coded vendor ranking;
-- duplicate resolution only suppresses derived-view duplicates and requires compatible metric/time/value;
+- source-version dedup selects the newest version of the same origin/type/source-record before normalization without deleting raw history;
+- cross-source duplicate resolution only suppresses derived-view duplicates and requires compatible metric/time/value;
 - raw records and tombstones remain immutable evidence;
 - missing-data warnings are emitted only for explicitly configured expected metrics;
 - baseline/analytics datasets pass lightweight internal contracts before they may influence planning;
