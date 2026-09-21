@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from datetime import date, datetime, timedelta
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -35,6 +35,7 @@ from .entity_payloads import (
     TrainingResponsePayload,
 )
 from .models import EntityRecordModel, PlanSnapshotModel
+from .observation_pipeline import ObservationPipeline, ObservationPipelineResult, load_health_connect_records
 
 
 @dataclass(frozen=True)
@@ -51,7 +52,8 @@ class ResolvedPlanningState:
 
 class PlanningStateResolver:
     def resolve(self, db: Session, *, today: date, weeks: int) -> ResolvedPlanningState:
-        goals = self.goals(db)
+        planning_now = datetime(today.year, today.month, today.day, 23, 59, 59, tzinfo=UTC)
+        goals = self.goals(db, now=planning_now)
         if not goals:
             raise ValueError("no active goals are synchronized")
         environment = self.environment(db)
@@ -61,13 +63,6 @@ class PlanningStateResolver:
         if readiness is None:
             raise ValueError("no readiness check-in is synchronized")
 
-        assessments = self._latest_assessments(db)
-        goals = tuple(
-            replace(goal, current=assessments.get(goal.metric, goal.current))
-            if goal.current is None and goal.metric in assessments
-            else goal
-            for goal in goals
-        )
         return ResolvedPlanningState(
             goals=goals,
             environment=environment,
@@ -92,10 +87,19 @@ class PlanningStateResolver:
         rows = self._active(db, entity_type)
         return rows[0] if rows else None
 
-    def goals(self, db: Session) -> tuple[Goal, ...]:
+    def goals(self, db: Session, *, now: datetime | None = None) -> tuple[Goal, ...]:
+        assessments = self._latest_assessments(db)
+        pipeline = self.health_pipeline(db, now=now)
+        baselines = pipeline.baselines if pipeline is not None else {}
+
         goals: list[Goal] = []
         for row in self._active(db, "goal"):
             payload = GoalPayload.model_validate(row.payload)
+            current = payload.current
+            if current is None and payload.metric in assessments:
+                current = assessments[payload.metric]
+            if current is None and payload.metric in baselines:
+                current = baselines[payload.metric].value
             goals.append(
                 Goal(
                     goal_id=payload.goal_id,
@@ -107,10 +111,21 @@ class PlanningStateResolver:
                     metric=payload.metric,
                     constraints=tuple(payload.constraints),
                     status=GoalStatus(payload.status),
-                    current=payload.current,
+                    current=current,
                 )
             )
         return tuple(sorted(goals, key=lambda item: (-item.priority, item.goal_id)))
+
+    def health_pipeline(
+        self,
+        db: Session,
+        *,
+        now: datetime | None = None,
+    ) -> ObservationPipelineResult | None:
+        records = load_health_connect_records(db)
+        if not records:
+            return None
+        return ObservationPipeline().run_health_connect(records, now=now)
 
     def environment(self, db: Session) -> TrainingEnvironment | None:
         row = self._latest(db, "training_environment")
