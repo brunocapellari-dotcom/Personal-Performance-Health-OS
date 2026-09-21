@@ -19,7 +19,13 @@ Role: packaged-product/barcode data. Use current API and preserve ODbL attributi
 ## Activity / Wearables
 
 ### Android Health Connect
-Role: preferred Android aggregation layer for supported apps/devices. Preserve originating data-source metadata rather than labeling everything simply as `Health Connect`.
+Role: canonical Android health/fitness interchange layer. Preserve originating DataOrigin plus client record/version, recording method, last-modified time and device manufacturer/model/type where available rather than labeling everything simply as `Health Connect`. Raw source records are retained; canonical timelines use explicit source-priority and duplicate policy.
+
+### android/health-samples
+Role: Apache-2.0 implementation reference for permissions, exercise/session reads, source-filtered aggregates, sleep, weight and Changes API. Reuse patterns/capabilities, not the sample app as a fork.
+
+### Health Connect Medical Records / FHIR
+Role: future compatibility boundary only. R4/R4B resources remain feature-gated, provenance-preserving and separate from clinical validation.
 
 ### FIT
 Role: file import for wearable/sport activities. Keep original file hash and parser version.
