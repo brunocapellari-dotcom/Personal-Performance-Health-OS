@@ -31,6 +31,7 @@ data class HealthBackfillPolicy(
         TrackedHealthType.SPEED to 90,
         TrackedHealthType.ELEVATION_GAINED to 90,
         TrackedHealthType.POWER to 90,
+        TrackedHealthType.VO2_MAX to 365,
         TrackedHealthType.ACTIVE_CALORIES to 90,
         TrackedHealthType.TOTAL_CALORIES to 90,
         TrackedHealthType.SLEEP to 365,
