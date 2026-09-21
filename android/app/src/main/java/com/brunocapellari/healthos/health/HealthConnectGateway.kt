@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.changes.DeletionChange
 import androidx.health.connect.client.changes.UpsertionChange
+import androidx.health.connect.client.request.AggregateRequest
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
 import androidx.health.connect.client.records.DistanceRecord
@@ -67,6 +68,23 @@ data class ChangeBatch(
     val deltas: List<HealthDelta>,
     val nextToken: String,
 )
+
+data class ExerciseAggregate(
+    val sourcePackage: String,
+    val durationSeconds: Long?,
+    val steps: Long?,
+    val distanceMeters: Double?,
+    val totalCaloriesKcal: Double?,
+    val activeCaloriesKcal: Double?,
+    val minHeartRateBpm: Long?,
+    val maxHeartRateBpm: Long?,
+    val avgHeartRateBpm: Long?,
+    val avgSpeedMetersPerSecond: Double?,
+    val elevationGainedMeters: Double?,
+    val avgPowerWatts: Double?,
+    val avgStepsCadence: Double?,
+)
+
 
 class HealthConnectTokenExpiredException : IllegalStateException("Health Connect changes token expired")
 
@@ -142,6 +160,46 @@ class HealthConnectGateway private constructor(
             readAll(ActiveCaloriesBurnedRecord::class, start, end).map { normalize(type, it) }
         TrackedHealthType.TOTAL_CALORIES ->
             readAll(TotalCaloriesBurnedRecord::class, start, end).map { normalize(type, it) }
+    }
+
+    suspend fun aggregateExerciseSession(uid: String): ExerciseAggregate {
+        val session = client.readRecord(ExerciseSessionRecord::class, uid).record
+        val timeRange = TimeRangeFilter.between(session.startTime, session.endTime)
+        val response = client.aggregate(
+            AggregateRequest(
+                metrics = setOf(
+                    ExerciseSessionRecord.EXERCISE_DURATION_TOTAL,
+                    StepsRecord.COUNT_TOTAL,
+                    DistanceRecord.DISTANCE_TOTAL,
+                    TotalCaloriesBurnedRecord.ENERGY_TOTAL,
+                    ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL,
+                    HeartRateRecord.BPM_MIN,
+                    HeartRateRecord.BPM_MAX,
+                    HeartRateRecord.BPM_AVG,
+                    SpeedRecord.SPEED_AVG,
+                    ElevationGainedRecord.ELEVATION_GAINED_TOTAL,
+                    PowerRecord.POWER_AVG,
+                    StepsCadenceRecord.RATE_AVG,
+                ),
+                timeRangeFilter = timeRange,
+                dataOriginFilter = setOf(session.metadata.dataOrigin),
+            ),
+        )
+        return ExerciseAggregate(
+            sourcePackage = session.metadata.dataOrigin.packageName,
+            durationSeconds = response[ExerciseSessionRecord.EXERCISE_DURATION_TOTAL]?.seconds,
+            steps = response[StepsRecord.COUNT_TOTAL],
+            distanceMeters = response[DistanceRecord.DISTANCE_TOTAL]?.inMeters,
+            totalCaloriesKcal = response[TotalCaloriesBurnedRecord.ENERGY_TOTAL]?.inKilocalories,
+            activeCaloriesKcal = response[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories,
+            minHeartRateBpm = response[HeartRateRecord.BPM_MIN],
+            maxHeartRateBpm = response[HeartRateRecord.BPM_MAX],
+            avgHeartRateBpm = response[HeartRateRecord.BPM_AVG],
+            avgSpeedMetersPerSecond = response[SpeedRecord.SPEED_AVG]?.inMetersPerSecond,
+            elevationGainedMeters = response[ElevationGainedRecord.ELEVATION_GAINED_TOTAL]?.inMeters,
+            avgPowerWatts = response[PowerRecord.POWER_AVG]?.inWatts,
+            avgStepsCadence = response[StepsCadenceRecord.RATE_AVG],
+        )
     }
 
     override suspend fun drain(type: TrackedHealthType, token: String): ChangeBatch {
