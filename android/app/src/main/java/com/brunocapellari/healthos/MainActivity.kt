@@ -552,6 +552,245 @@ private fun Dashboard(
 }
 
 @Composable
+private fun InitialSetupSection(
+    onSave: (InitialSetupInput) -> Unit,
+) {
+    var goalDescription by remember { mutableStateOf("") }
+    var goalMetric by remember { mutableStateOf("") }
+    var goalPriority by remember { mutableStateOf("5") }
+    var goalBaseline by remember { mutableStateOf("") }
+    var goalTarget by remember { mutableStateOf("") }
+    var goalTargetDate by remember { mutableStateOf("") }
+    var environment by remember { mutableStateOf("HOME") }
+    var equipment by remember { mutableStateOf("") }
+    var spaceM2 by remember { mutableStateOf("10") }
+    var fixationPoints by remember { mutableStateOf("") }
+    var noiseLimit by remember { mutableStateOf("moderate") }
+    var surface by remember { mutableStateOf("indoor") }
+    var availableMinutes by remember { mutableStateOf("60") }
+    var loadOptions by remember { mutableStateOf("") }
+    var sleepHours by remember { mutableStateOf("7") }
+    var sleepQuality by remember { mutableStateOf("3") }
+    var energy by remember { mutableStateOf("3") }
+    var fatigue by remember { mutableStateOf("3") }
+    var soreness by remember { mutableStateOf("3") }
+    var stress by remember { mutableStateOf("3") }
+    var painFlag by remember { mutableStateOf(false) }
+    var setupError by remember { mutableStateOf("") }
+
+    Text("Configuração inicial", style = MaterialTheme.typography.titleMedium)
+    OutlinedTextField(
+        value = goalDescription,
+        onValueChange = { goalDescription = it },
+        label = { Text("Objetivo principal") },
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedTextField(
+        value = goalMetric,
+        onValueChange = { goalMetric = it },
+        label = { Text("Métrica do objetivo, ex.: weight_kg ou distance_m") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedTextField(
+        value = goalPriority,
+        onValueChange = { goalPriority = it.filter(Char::isDigit) },
+        label = { Text("Prioridade 1–5") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedTextField(
+        value = goalBaseline,
+        onValueChange = { goalBaseline = it.filterDecimalInput() },
+        label = { Text("Baseline do objetivo (opcional)") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedTextField(
+        value = goalTarget,
+        onValueChange = { goalTarget = it.filterDecimalInput() },
+        label = { Text("Meta numérica (opcional)") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedTextField(
+        value = goalTargetDate,
+        onValueChange = { goalTargetDate = it.filter { char -> char.isDigit() || char == '-' } },
+        label = { Text("Data-alvo AAAA-MM-DD (opcional)") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+
+    Text("Ambiente de treino")
+    listOf("HOME", "GYM", "OUTDOOR", "TRAVEL", "MINIMAL_EQUIPMENT").forEach { option ->
+        Row {
+            RadioButton(selected = environment == option, onClick = { environment = option })
+            Text(option)
+        }
+    }
+    OutlinedTextField(
+        value = equipment,
+        onValueChange = { equipment = it },
+        label = { Text("Equipamentos separados por vírgula") },
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedTextField(
+        value = spaceM2,
+        onValueChange = { spaceM2 = it.filterDecimalInput() },
+        label = { Text("Espaço disponível em m²") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedTextField(
+        value = fixationPoints,
+        onValueChange = { fixationPoints = it },
+        label = { Text("Pontos de fixação seguros, separados por vírgula") },
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Text("Limite de ruído")
+    listOf("low", "moderate", "high").forEach { option ->
+        Row {
+            RadioButton(selected = noiseLimit == option, onClick = { noiseLimit = option })
+            Text(option)
+        }
+    }
+    OutlinedTextField(
+        value = surface,
+        onValueChange = { surface = it },
+        label = { Text("Superfície, ex.: indoor, concrete, grass") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedTextField(
+        value = availableMinutes,
+        onValueChange = { availableMinutes = it.filter(Char::isDigit) },
+        label = { Text("Minutos disponíveis por sessão") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedTextField(
+        value = loadOptions,
+        onValueChange = { loadOptions = it },
+        label = { Text("Cargas realmente disponíveis em kg, ex.: 10,16,20,22") },
+        modifier = Modifier.fillMaxWidth(),
+    )
+
+    Text("Check-in de readiness", style = MaterialTheme.typography.titleSmall)
+    OutlinedTextField(
+        value = sleepHours,
+        onValueChange = { sleepHours = it.filterDecimalInput() },
+        label = { Text("Horas de sono") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    listOf(
+        "Qualidade do sono" to Pair(sleepQuality) { value: String -> sleepQuality = value },
+        "Energia" to Pair(energy) { value: String -> energy = value },
+        "Fadiga" to Pair(fatigue) { value: String -> fatigue = value },
+        "Dor muscular" to Pair(soreness) { value: String -> soreness = value },
+        "Estresse" to Pair(stress) { value: String -> stress = value },
+    ).forEach { (label, state) ->
+        OutlinedTextField(
+            value = state.first,
+            onValueChange = { value -> state.second(value.filter(Char::isDigit)) },
+            label = { Text("$label 1–5") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+    Row {
+        Checkbox(checked = painFlag, onCheckedChange = { painFlag = it })
+        Text("Dor incomum / sinal de segurança")
+    }
+
+    Button(
+        onClick = {
+            val priority = goalPriority.toIntOrNull()
+            val space = spaceM2.normalizedDecimalOrNull()
+            val minutes = availableMinutes.toIntOrNull()
+            val sleep = sleepHours.normalizedDecimalOrNull()
+            val ratings = listOf(sleepQuality, energy, fatigue, soreness, stress).map { it.toIntOrNull() }
+            val baseline = goalBaseline.optionalDecimalOrNull()
+            val target = goalTarget.optionalDecimalOrNull()
+            val targetDate = if (goalTargetDate.isBlank()) {
+                null
+            } else {
+                runCatching { LocalDate.parse(goalTargetDate) }.getOrNull()
+            }
+            val loads = if (loadOptions.isBlank()) {
+                emptyList()
+            } else {
+                loadOptions.split(',').mapNotNull { it.trim().normalizedDecimalOrNull() }
+            }
+            val targetDateValid = goalTargetDate.isBlank() || targetDate != null
+            val loadsValid = loadOptions.isBlank() || loads.size == loadOptions.split(',').count { it.trim().isNotEmpty() }
+
+            if (
+                goalDescription.isBlank() ||
+                goalMetric.isBlank() ||
+                priority !in 1..5 ||
+                space == null ||
+                minutes !in 15..240 ||
+                sleep == null ||
+                ratings.any { it !in 1..5 } ||
+                (goalBaseline.isNotBlank() && baseline == null) ||
+                (goalTarget.isNotBlank() && target == null) ||
+                !targetDateValid ||
+                !loadsValid
+            ) {
+                setupError = "Revise os campos da configuração inicial."
+            } else {
+                setupError = ""
+                onSave(
+                    InitialSetupInput(
+                        goalDescription = goalDescription.trim(),
+                        goalMetric = goalMetric.trim(),
+                        goalPriority = priority!!,
+                        goalBaseline = baseline,
+                        goalTarget = target,
+                        goalTargetDate = targetDate,
+                        environment = environment,
+                        equipment = equipment.csvValues(),
+                        spaceM2 = space,
+                        fixationPoints = fixationPoints.csvValues(),
+                        noiseLimit = noiseLimit,
+                        surface = surface.trim(),
+                        availableMinutes = minutes!!,
+                        loadOptionsKg = loads,
+                        sleepHours = sleep,
+                        sleepQuality = ratings[0]!!,
+                        energy = ratings[1]!!,
+                        fatigue = ratings[2]!!,
+                        soreness = ratings[3]!!,
+                        stress = ratings[4]!!,
+                        painFlag = painFlag,
+                    ),
+                )
+            }
+        },
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text("Salvar configuração inicial")
+    }
+    if (setupError.isNotBlank()) {
+        Text(setupError, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+private fun String.filterDecimalInput(): String =
+    filter { char -> char.isDigit() || char == '.' || char == ',' || char == '-' }
+
+private fun String.normalizedDecimalOrNull(): Double? =
+    trim().replace(',', '.').toDoubleOrNull()
+
+private fun String.optionalDecimalOrNull(): Double? =
+    if (isBlank()) null else normalizedDecimalOrNull()
+
+private fun String.csvValues(): List<String> =
+    split(',').map(String::trim).filter(String::isNotBlank).distinct()
+
+
+@Composable
 private fun PrivacyRationale() {
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
