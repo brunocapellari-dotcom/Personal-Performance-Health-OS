@@ -77,6 +77,7 @@ PLAUSIBLE_RANGES: dict[str, tuple[float, float]] = {
     "steps_cadence_spm": (0.0, 400.0),
     "heart_rate_bpm": (20.0, 300.0),
     "resting_heart_rate_bpm": (20.0, 300.0),
+    "hrv_rmssd_ms": (1.0, 200.0),
     "weight_kg": (1.0, 1000.0),
     "sleep_duration_min": (0.0, 2880.0),
     "exercise_duration_min": (0.0, 2880.0),
@@ -85,6 +86,11 @@ PLAUSIBLE_RANGES: dict[str, tuple[float, float]] = {
     "elevation_gained_m": (-10_000.0, 100_000.0),
     "power_w": (0.0, 5000.0),
     "vo2_max_ml_kg_min": (5.0, 100.0),
+    "cycling_cadence_rpm": (0.0, 300.0),
+    "floors_climbed": (0.0, 10000.0),
+    "body_fat_pct": (0.0, 100.0),
+    "lean_body_mass_kg": (0.0, 1000.0),
+    "hydration_l": (0.0, 100.0),
     "active_calories_kcal": (0.0, 20_000.0),
     "total_calories_kcal": (0.0, 30_000.0),
 }
@@ -94,6 +100,7 @@ DUPLICATE_POLICIES: dict[str, DuplicatePolicy] = {
     "steps_cadence_spm": DuplicatePolicy(timedelta(seconds=5), 0.5),
     "heart_rate_bpm": DuplicatePolicy(timedelta(seconds=2), 1.0),
     "resting_heart_rate_bpm": DuplicatePolicy(timedelta(minutes=5), 1.0),
+    "hrv_rmssd_ms": DuplicatePolicy(timedelta(minutes=5), 1.0),
     "weight_kg": DuplicatePolicy(timedelta(minutes=5), 0.05),
     "sleep_duration_min": DuplicatePolicy(timedelta(minutes=5), 2.0),
     "exercise_duration_min": DuplicatePolicy(timedelta(minutes=5), 1.0),
@@ -102,6 +109,11 @@ DUPLICATE_POLICIES: dict[str, DuplicatePolicy] = {
     "elevation_gained_m": DuplicatePolicy(timedelta(seconds=60), 0.5),
     "power_w": DuplicatePolicy(timedelta(seconds=2), 2.0),
     "vo2_max_ml_kg_min": DuplicatePolicy(timedelta(minutes=5), 0.2),
+    "cycling_cadence_rpm": DuplicatePolicy(timedelta(seconds=2), 1.0),
+    "floors_climbed": DuplicatePolicy(timedelta(seconds=60), 0.1),
+    "body_fat_pct": DuplicatePolicy(timedelta(minutes=5), 0.2),
+    "lean_body_mass_kg": DuplicatePolicy(timedelta(minutes=5), 0.1),
+    "hydration_l": DuplicatePolicy(timedelta(minutes=5), 0.05),
     "active_calories_kcal": DuplicatePolicy(timedelta(seconds=60), 1.0),
     "total_calories_kcal": DuplicatePolicy(timedelta(seconds=60), 1.0),
 }
@@ -115,6 +127,8 @@ ADDITIVE_DAILY_METRICS = frozenset(
         "elevation_gained_m",
         "active_calories_kcal",
         "total_calories_kcal",
+        "floors_climbed",
+        "hydration_l",
     }
 )
 
@@ -284,6 +298,60 @@ class HealthConnectNormalizer:
                     "ml/kg/min",
                     self._time(data.get("time"), fallback_time),
                     extra_metadata={"measurement_method": data.get("measurementMethod")},
+                ),
+            )
+        if record_type == "heart_rate_variability_rmssd":
+            return (
+                observation(
+                    "hrv_rmssd_ms",
+                    float(data["rmssdMillis"]),
+                    "ms",
+                    self._time(data.get("time"), fallback_time),
+                ),
+            )
+        if record_type == "cycling_pedaling_cadence":
+            return self._series(
+                data,
+                observation,
+                value_key="revolutionsPerMinute",
+                metric="cycling_cadence_rpm",
+                unit="rpm",
+                fallback_time=fallback_time,
+            )
+        if record_type == "floors_climbed":
+            return (
+                observation(
+                    "floors_climbed",
+                    float(data["floors"]),
+                    "floors",
+                    self._time(data.get("endTime"), fallback_time),
+                ),
+            )
+        if record_type == "body_fat":
+            return (
+                observation(
+                    "body_fat_pct",
+                    float(data["percent"]),
+                    "%",
+                    self._time(data.get("time"), fallback_time),
+                ),
+            )
+        if record_type == "lean_body_mass":
+            return (
+                observation(
+                    "lean_body_mass_kg",
+                    float(data["kilograms"]),
+                    "kg",
+                    self._time(data.get("time"), fallback_time),
+                ),
+            )
+        if record_type == "hydration":
+            return (
+                observation(
+                    "hydration_l",
+                    float(data["liters"]),
+                    "L",
+                    self._time(data.get("endTime"), fallback_time),
                 ),
             )
         if record_type == "active_calories":
