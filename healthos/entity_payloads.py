@@ -172,6 +172,26 @@ class BodyMeasurementPayload(EntityPayload):
     label: str | None = Field(default=None, max_length=128)
 
 
+class HealthSourcePriorityPayload(EntityPayload):
+    ordered_source_ids: list[str] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def unique_sources(self) -> "HealthSourcePriorityPayload":
+        normalized = [item.strip() for item in self.ordered_source_ids]
+        if any(not item for item in normalized):
+            raise ValueError("source priority IDs cannot be blank")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("source priority IDs cannot contain duplicates")
+        self.ordered_source_ids = normalized
+        return self
+
+
+class MetricExpectationPayload(EntityPayload):
+    metric: str = Field(min_length=1, max_length=128)
+    max_age_hours: int = Field(ge=1, le=24 * 365)
+    enabled: bool = True
+
+
 class HealthObservationPayload(EntityPayload):
     record_type: str = Field(min_length=1, max_length=128)
     source_record_id: str = Field(min_length=1, max_length=256)
@@ -210,6 +230,8 @@ ENTITY_MODELS: dict[str, type[EntityPayload]] = {
     "medication_event": MedicationEventPayload,
     "supplement_event": SupplementEventPayload,
     "body_measurement": BodyMeasurementPayload,
+    "health_source_priority": HealthSourcePriorityPayload,
+    "metric_expectation": MetricExpectationPayload,
     "health_connect_tombstone": HealthObservationPayload,
 }
 
