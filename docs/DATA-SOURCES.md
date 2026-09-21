@@ -4,7 +4,7 @@ The Personal Performance & Health OS must keep data provenance, licensing, fresh
 
 ## Personal health and activity
 
-- **Android Health Connect** — canonical Android interchange layer for user-authorized health and fitness records. Store source application/data-origin metadata and preserve differential-change history.
+- **Android Health Connect** — canonical Android interchange layer for user-authorized health and fitness records. Production ingestion covers exercise, steps/cadence, distance, total/active calories, sleep, heart rate/resting heart rate, weight, speed, elevation and power on the stable client. Preserve DataOrigin, last-modified time, client record ID/version, recording method and device metadata per record, together with differential-change history.
 - **FIT files** — `fitdecode` remains the default permissive parser. The official Garmin FIT SDK may be used as an optional interoperability validator when its protocol licence is acceptable for the intended deployment.
 - **CSV/GPX/manual import** — accepted through normalized adapters; imported values must keep import timestamp, original source, unit and raw hash.
 
@@ -42,3 +42,15 @@ Every normalized external record should retain at least:
 - `metadata`
 
 Source priority never authorizes silent overwrites. Corrections create a new provenance-aware record or a tombstone/update event according to the entity policy.
+
+
+## Medical-record compatibility
+
+- **Health Connect Medical Records / HL7 FHIR** — future, feature-gated compatibility only. Accept R4/R4B envelopes with explicit provenance and raw hashes when enabled. Do not treat FHIR syntactic compatibility as clinical validation and do not deploy hospital/EHR infrastructure merely for future compatibility.
+
+## Analytical data quality
+
+- Derived baseline/analytics tables use small internal deterministic contracts today.
+- Soda Core may be evaluated later as an external contract runner for aggregate PostgreSQL/BigQuery datasets only.
+- Pandera is reserved for future dataframe-scale validation.
+- None of these tools may replace medication safety, medical review, or domain-specific health rules.
