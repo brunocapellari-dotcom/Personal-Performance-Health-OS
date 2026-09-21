@@ -222,3 +222,99 @@ def test_newer_source_record_version_wins_before_normalization() -> None:
     assert result.normalized_count == 1
     assert result.canonical[0].value == 100.5
     assert result.source_version_suppressed_ids == ("old-entity",)
+
+
+def test_recovery_body_and_hydration_metrics_normalize_into_canonical_timeline() -> None:
+    now = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
+    records = (
+        (
+            "hrv-entity",
+            _payload(
+                record_type="heart_rate_variability_rmssd",
+                source_record_id="hrv-1",
+                observed_at=now,
+                package="com.synthetic.watch",
+                data={"rmssdMillis": 48.0, "time": now.isoformat()},
+            ),
+        ),
+        (
+            "fat-entity",
+            _payload(
+                record_type="body_fat",
+                source_record_id="fat-1",
+                observed_at=now,
+                package="com.synthetic.scale",
+                data={"percent": 28.5, "time": now.isoformat()},
+            ),
+        ),
+        (
+            "lean-entity",
+            _payload(
+                record_type="lean_body_mass",
+                source_record_id="lean-1",
+                observed_at=now,
+                package="com.synthetic.scale",
+                data={"kilograms": 71.2, "time": now.isoformat()},
+            ),
+        ),
+        (
+            "hydration-entity",
+            _payload(
+                record_type="hydration",
+                source_record_id="water-1",
+                observed_at=now,
+                package="com.synthetic.nutrition",
+                data={
+                    "liters": 0.5,
+                    "startTime": (now - timedelta(minutes=2)).isoformat(),
+                    "endTime": now.isoformat(),
+                },
+            ),
+        ),
+        (
+            "floors-entity",
+            _payload(
+                record_type="floors_climbed",
+                source_record_id="floors-1",
+                observed_at=now,
+                package="com.synthetic.watch",
+                data={
+                    "floors": 12.0,
+                    "startTime": (now - timedelta(hours=1)).isoformat(),
+                    "endTime": now.isoformat(),
+                },
+            ),
+        ),
+        (
+            "cycling-entity",
+            _payload(
+                record_type="cycling_pedaling_cadence",
+                source_record_id="cadence-1",
+                observed_at=now,
+                package="com.synthetic.bike",
+                data={
+                    "startTime": (now - timedelta(minutes=1)).isoformat(),
+                    "endTime": now.isoformat(),
+                    "samples": [
+                        {"time": (now - timedelta(seconds=30)).isoformat(), "revolutionsPerMinute": 82.0},
+                        {"time": now.isoformat(), "revolutionsPerMinute": 88.0},
+                    ],
+                },
+            ),
+        ),
+    )
+
+    result = ObservationPipeline().run_health_connect(records, now=now)
+
+    by_metric = {}
+    for observation in result.canonical:
+        by_metric.setdefault(observation.metric, []).append(observation.value)
+
+    assert by_metric["hrv_rmssd_ms"] == [48.0]
+    assert by_metric["body_fat_pct"] == [28.5]
+    assert by_metric["lean_body_mass_kg"] == [71.2]
+    assert by_metric["hydration_l"] == [0.5]
+    assert by_metric["floors_climbed"] == [12.0]
+    assert by_metric["cycling_cadence_rpm"] == [82.0, 88.0]
+    assert result.baseline_contract.passed
+    assert result.analytics_contract.passed
