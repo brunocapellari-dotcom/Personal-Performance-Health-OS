@@ -1,8 +1,10 @@
 package com.brunocapellari.healthos.health
 
+import androidx.health.connect.client.records.SpeedRecord
 import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.records.metadata.Metadata
 import androidx.health.connect.client.testing.FakeHealthConnectClient
+import androidx.health.connect.client.units.Velocity
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
