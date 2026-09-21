@@ -328,9 +328,10 @@ def create_app(
             59,
             tzinfo=UTC,
         )
-        synced_goals = resolver.goals(db, now=planning_now)
+        health_pipeline = resolver.health_pipeline(db, now=planning_now)
+        synced_goals = resolver.goals(db, now=planning_now, pipeline=health_pipeline)
         synced_environment = resolver.environment(db)
-        synced_readiness = resolver.readiness(db)
+        synced_readiness = resolver.readiness(db, now=planning_now, pipeline=health_pipeline)
 
         if payload.goals is None and not synced_goals:
             raise HTTPException(status_code=422, detail="no active goals are available")
