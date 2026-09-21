@@ -114,6 +114,8 @@ data class ExerciseAggregate(
     val elevationGainedMeters: Double?,
     val avgPowerWatts: Double?,
     val avgStepsCadence: Double?,
+    val avgCyclingCadenceRpm: Double?,
+    val floorsClimbed: Double?,
 )
 
 
@@ -255,6 +257,8 @@ class HealthConnectGateway private constructor(
         if (TrackedHealthType.ELEVATION_GAINED in readable) metrics += ElevationGainedRecord.ELEVATION_GAINED_TOTAL
         if (TrackedHealthType.POWER in readable) metrics += PowerRecord.POWER_AVG
         if (TrackedHealthType.STEPS_CADENCE in readable) metrics += StepsCadenceRecord.RATE_AVG
+        if (TrackedHealthType.CYCLING_CADENCE in readable) metrics += CyclingPedalingCadenceRecord.RPM_AVG
+        if (TrackedHealthType.FLOORS_CLIMBED in readable) metrics += FloorsClimbedRecord.FLOORS_CLIMBED_TOTAL
 
         val response = client.aggregate(
             AggregateRequest(
@@ -302,6 +306,16 @@ class HealthConnectGateway private constructor(
             },
             avgStepsCadence = if (TrackedHealthType.STEPS_CADENCE in readable) {
                 response[StepsCadenceRecord.RATE_AVG]
+            } else {
+                null
+            },
+            avgCyclingCadenceRpm = if (TrackedHealthType.CYCLING_CADENCE in readable) {
+                response[CyclingPedalingCadenceRecord.RPM_AVG]
+            } else {
+                null
+            },
+            floorsClimbed = if (TrackedHealthType.FLOORS_CLIMBED in readable) {
+                response[FloorsClimbedRecord.FLOORS_CLIMBED_TOTAL]
             } else {
                 null
             },
