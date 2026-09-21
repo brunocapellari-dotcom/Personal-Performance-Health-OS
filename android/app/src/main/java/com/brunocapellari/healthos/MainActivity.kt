@@ -92,6 +92,15 @@ class MainActivity : ComponentActivity() {
                             onCorePermissions = {
                                 permissionsLauncher.launch(container.healthConnect.readPermissions())
                             },
+                            onPerformancePermissions = {
+                                permissionsLauncher.launch(container.healthConnect.performanceReadPermissions())
+                            },
+                            onBodyPermissions = {
+                                permissionsLauncher.launch(container.healthConnect.bodyCompositionReadPermissions())
+                            },
+                            onNutritionPermissions = {
+                                permissionsLauncher.launch(container.healthConnect.nutritionReadPermissions())
+                            },
                             onExtendedPermissions = {
                                 permissionsLauncher.launch(container.healthConnect.extendedReadPermissions())
                             },
@@ -251,6 +260,9 @@ private fun Dashboard(
     activeSessionId: String,
     plannedExercises: List<PlannedExerciseUi>,
     onCorePermissions: () -> Unit,
+    onPerformancePermissions: () -> Unit,
+    onBodyPermissions: () -> Unit,
+    onNutritionPermissions: () -> Unit,
     onExtendedPermissions: () -> Unit,
     onEnroll: (String) -> Unit,
     onSync: () -> Unit,
@@ -282,10 +294,19 @@ private fun Dashboard(
         Text("Personal Performance & Health OS", style = MaterialTheme.typography.headlineSmall)
         Text(healthStatus)
         Button(onClick = onCorePermissions, modifier = Modifier.fillMaxWidth()) {
-            Text("Autorizar leitura básica do Health Connect")
+            Text("Autorizar métricas básicas do Health Connect")
+        }
+        Button(onClick = onPerformancePermissions, modifier = Modifier.fillMaxWidth()) {
+            Text("Autorizar métricas de performance (opcional)")
+        }
+        Button(onClick = onBodyPermissions, modifier = Modifier.fillMaxWidth()) {
+            Text("Autorizar composição corporal (opcional)")
+        }
+        Button(onClick = onNutritionPermissions, modifier = Modifier.fillMaxWidth()) {
+            Text("Autorizar hidratação (opcional)")
         }
         Button(onClick = onExtendedPermissions, modifier = Modifier.fillMaxWidth()) {
-            Text("Autorizar histórico e segundo plano (opcional)")
+            Text("Autorizar histórico ampliado e segundo plano (opcional)")
         }
         OutlinedTextField(
             value = bootstrapToken,
