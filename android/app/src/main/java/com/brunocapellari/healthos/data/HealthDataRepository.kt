@@ -11,6 +11,7 @@ import org.json.JSONObject
 import java.security.MessageDigest
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 
 
@@ -123,6 +124,88 @@ class HealthDataRepository(
 
     suspend fun conflictCount(): Int = database.syncConflictDao().count()
 
+    suspend fun saveInitialSetup(
+        goalDescription: String,
+        goalMetric: String,
+        goalPriority: Int,
+        goalBaseline: Double?,
+        goalTarget: Double?,
+        goalTargetDate: LocalDate?,
+        environment: String,
+        equipment: List<String>,
+        spaceM2: Double,
+        fixationPoints: List<String>,
+        noiseLimit: String,
+        surface: String,
+        availableMinutes: Int,
+        loadOptionsKg: List<Double>,
+        sleepHours: Double,
+        sleepQuality: Int,
+        energy: Int,
+        fatigue: Int,
+        soreness: Int,
+        stress: Int,
+        painFlag: Boolean,
+    ): String {
+        require(goalDescription.isNotBlank()) { "goal description is required" }
+        require(goalMetric.isNotBlank()) { "goal metric is required" }
+        require(goalPriority in 1..5) { "goal priority must be between 1 and 5" }
+        require(environment in setOf("HOME", "GYM", "OUTDOOR", "TRAVEL", "MINIMAL_EQUIPMENT")) {
+            "unsupported training environment"
+        }
+        require(spaceM2 > 0.0) { "space must be positive" }
+        require(noiseLimit in setOf("low", "moderate", "high")) { "invalid noise limit" }
+        require(surface.isNotBlank()) { "surface is required" }
+        require(availableMinutes in 15..240) { "available minutes must be between 15 and 240" }
+        require(loadOptionsKg.all { it > 0.0 && it <= 5000.0 }) { "invalid available load" }
+        require(loadOptionsKg.distinct().size == loadOptionsKg.size) { "available loads must be unique" }
+        require(sleepHours in 0.0..24.0) { "sleep hours must be between 0 and 24" }
+        require(listOf(sleepQuality, energy, fatigue, soreness, stress).all { it in 1..5 }) {
+            "readiness ratings must be between 1 and 5"
+        }
+
+        val now = Instant.now()
+        val logicalClock = now.toEpochMilli().coerceAtLeast(1)
+        val goalId = UUID.randomUUID().toString()
+        val goal = JSONObject()
+            .put("goal_id", goalId)
+            .put("description", goalDescription.trim())
+            .put("priority", goalPriority)
+            .put("metric", goalMetric.trim())
+            .put("constraints", JSONArray())
+        if (goalBaseline != null) goal.put("baseline", goalBaseline)
+        if (goalTarget != null) goal.put("target", goalTarget)
+        if (goalTargetDate != null) goal.put("target_date", goalTargetDate.toString())
+
+        val cleanEquipment = equipment.map(String::trim).filter(String::isNotBlank).distinct()
+        val cleanFixationPoints = fixationPoints.map(String::trim).filter(String::isNotBlank).distinct()
+        val trainingEnvironment = JSONObject()
+            .put("environment", environment)
+            .put("equipment", JSONArray(cleanEquipment))
+            .put("space_m2", spaceM2)
+            .put("fixation_points", JSONArray(cleanFixationPoints))
+            .put("noise_limit", noiseLimit)
+            .put("surface", surface.trim())
+            .put("available_minutes", availableMinutes)
+            .put("load_options_kg", JSONArray(loadOptionsKg.sorted()))
+
+        val readinessId = "readiness-${UUID.randomUUID()}"
+        val readiness = JSONObject()
+            .put("observed_at", now.toString())
+            .put("sleep_hours", sleepHours)
+            .put("sleep_quality_1_5", sleepQuality)
+            .put("energy_1_5", energy)
+            .put("fatigue_1_5", fatigue)
+            .put("soreness_1_5", soreness)
+            .put("stress_1_5", stress)
+            .put("pain_flag", painFlag)
+
+        stageEntity("goal", goalId, goal, logicalClock)
+        stageEntity("training_environment", "primary", trainingEnvironment, logicalClock + 1)
+        stageEntity("readiness", readinessId, readiness, logicalClock + 2)
+        return goalId
+    }
+
     suspend fun recordPerformedSession(
         plannedSessionId: String,
         completed: Boolean,
@@ -147,20 +230,34 @@ class HealthDataRepository(
             .put("notes", notes)
             .put("exercises", exercises)
 
-        val fingerprint = "performed_session|$performedId|${payload}"
+        stageEntity(
+            entityType = "performed_session",
+            entityId = performedId,
+            payload = payload,
+            logicalClock = now.toEpochMilli().coerceAtLeast(1),
+        )
+        return performedId
+    }
+
+    private suspend fun stageEntity(
+        entityType: String,
+        entityId: String,
+        payload: JSONObject,
+        logicalClock: Long,
+    ) {
+        val fingerprint = "$entityType|$entityId|$logicalClock|${payload}"
         val changeId = sha256(fingerprint)
         database.pendingChangeDao().insert(
             PendingChangeEntity(
                 changeId = changeId,
-                entityType = "performed_session",
-                entityId = performedId,
-                logicalClock = now.toEpochMilli().coerceAtLeast(1),
+                entityType = entityType,
+                entityId = entityId,
+                logicalClock = logicalClock,
                 deleted = false,
                 payloadJson = payload.toString(),
-                createdAtEpochMillis = now.toEpochMilli(),
+                createdAtEpochMillis = System.currentTimeMillis(),
             ),
         )
-        return performedId
     }
 
     private suspend fun syncHealthType(type: TrackedHealthType): Int {
