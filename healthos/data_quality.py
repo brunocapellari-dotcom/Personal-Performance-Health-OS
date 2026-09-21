@@ -157,7 +157,12 @@ class SourceResolver:
             return abs(float(left) - float(right)) <= tolerance
         return str(left) == str(right)
 
-    def deduplicate(self, observations: tuple[Observation, ...]) -> DeduplicationDecision:
+    def deduplicate(
+        self,
+        observations: tuple[Observation, ...],
+        *,
+        tolerance: timedelta | None = None,
+    ) -> DeduplicationDecision:
         if not observations:
             return DeduplicationDecision((), ())
 
@@ -166,6 +171,8 @@ class SourceResolver:
         for obs in ordered:
             matching_group: list[Observation] | None = None
             policy = self._policy(obs.metric)
+            if tolerance is not None:
+                policy = DuplicatePolicy(tolerance, policy.absolute_value_tolerance)
             if policy.time_tolerance.total_seconds() < 0 or policy.absolute_value_tolerance < 0:
                 raise ValueError("duplicate policy tolerances cannot be negative")
             for group in reversed(groups):
