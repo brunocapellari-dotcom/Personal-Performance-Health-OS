@@ -1,4 +1,4 @@
-# Gap Analysis — 2026-09-18
+# Gap Analysis — 2026-09-21
 
 ## Implemented
 
@@ -14,6 +14,12 @@
 - Android Kotlin/Compose client;
 - Room 3 + SQLCipher + Android Keystore local storage;
 - Health Connect differential sync by record type and bounded background worker;
+- stable Health Connect coverage for exercise, steps/cadence, distance, speed, elevation, power, total/active calories, sleep, heart rate/resting heart rate and weight;
+- per-record Health Connect provenance with DataOrigin, last-modified time, client record/version, recording method and device metadata;
+- canonical observation pipeline: source identification → normalization → quality/confidence → duplicate resolution → timeline → missing-data → baseline → analytics;
+- persisted source priority and per-metric missing-data expectations;
+- internal aggregate dataset contracts, with Soda/Pandera/GX kept out of runtime until measured need;
+- feature-gated FHIR R4/R4B compatibility boundary without hospital/EHR infrastructure;
 - sync independent from Health Connect consent;
 - USDA FoodData Central and Open Food Facts normalized adapters;
 - source-license/use policy enforcement;
@@ -34,8 +40,9 @@ These are release gates, not future modules:
 6. execute Android instrumentation/fake Health Connect tests where supported;
 7. execute physical-device Health Connect and offline/online sync validation;
 8. connect Calendar, Research AI and Segundo Cérebro through scoped contracts;
-9. expand exercise catalogue and performed-session persistence while preserving provenance/license rules;
-10. run the final real-device E2E and prove adaptive next prescription.
+9. expand exercise catalogue and continue Android UX for full performed-session capture while preserving provenance/license rules;
+10. validate the expanded Health Connect metric set and source-filtered workout aggregates on a physical device;
+11. run the final real-device E2E and prove adaptive next prescription.
 
 ## Explicitly rejected shortcuts
 
