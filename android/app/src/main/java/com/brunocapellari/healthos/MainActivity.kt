@@ -34,6 +34,14 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
+data class HealthPermissionStatus(
+    val coreComplete: Boolean,
+    val readableCount: Int,
+    val totalCount: Int,
+    val history: Boolean,
+    val background: Boolean,
+)
+
 data class PlannedExerciseUi(
     val exerciseId: String,
     val plannedSets: Int,
@@ -108,19 +116,23 @@ class MainActivity : ComponentActivity() {
                 return@launch
             }
             val status = withContext(Dispatchers.IO) {
-                Triple(
-                    container.healthConnect.hasCoreReadPermissions(),
-                    container.healthConnect.hasHistoryReadPermission(),
-                    container.healthConnect.hasBackgroundReadPermission(),
+                val readable = container.healthConnect.readableTypes()
+                HealthPermissionStatus(
+                    coreComplete = container.healthConnect.hasCoreReadPermissions(),
+                    readableCount = readable.size,
+                    totalCount = com.brunocapellari.healthos.health.TrackedHealthType.entries.size,
+                    history = container.healthConnect.hasHistoryReadPermission(),
+                    background = container.healthConnect.hasBackgroundReadPermission(),
                 )
             }
-            healthText.value = if (status.first) {
-                "Health Connect autorizado; histórico ampliado: " +
-                    (if (status.second) "sim" else "não") +
-                    "; leitura em segundo plano: " +
-                    (if (status.third) "sim" else "não")
-            } else {
-                "Permissões básicas do Health Connect pendentes"
+            healthText.value = when {
+                status.readableCount == 0 -> "Nenhuma métrica do Health Connect autorizada"
+                status.coreComplete ->
+                    "Health Connect: ${status.readableCount}/${status.totalCount} métricas autorizadas; " +
+                        "histórico ampliado: ${if (status.history) "sim" else "não"}; " +
+                        "segundo plano: ${if (status.background) "sim" else "não"}"
+                else ->
+                    "Health Connect parcialmente autorizado: ${status.readableCount}/${status.totalCount} métricas"
             }
         }
     }
