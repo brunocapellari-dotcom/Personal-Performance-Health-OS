@@ -659,33 +659,50 @@ class ObservationPipeline:
 
 
 def load_health_connect_records(db: Session) -> tuple[tuple[str, HealthObservationPayload], ...]:
-    tombstoned: set[tuple[str, str]] = set()
-    for row in db.scalars(
+    latest_tombstone: dict[tuple[str, str], tuple[int, int, str]] = {}
+    tombstone_rows = db.scalars(
         select(EntityRecordModel).where(
             EntityRecordModel.entity_type == "health_connect_tombstone",
             EntityRecordModel.deleted.is_(False),
         )
-    ).all():
+    ).all()
+    for row in tombstone_rows:
         try:
             payload = HealthObservationPayload.model_validate(row.payload)
         except ValueError:
             continue
-        tombstoned.add((payload.record_type, payload.source_record_id))
+        key = (payload.record_type, payload.source_record_id)
+        order = (
+            payload.last_modified_at_epoch_ms or row.logical_clock,
+            row.logical_clock,
+            row.entity_id,
+        )
+        previous = latest_tombstone.get(key)
+        if previous is None or order > previous:
+            latest_tombstone[key] = order
 
     records: list[tuple[str, HealthObservationPayload]] = []
-    for row in db.scalars(
+    rows = db.scalars(
         select(EntityRecordModel).where(
             EntityRecordModel.entity_type == "observation",
             EntityRecordModel.deleted.is_(False),
         )
-    ).all():
+    ).all()
+    for row in rows:
         if "record_type" not in row.payload:
             continue
         try:
             payload = HealthObservationPayload.model_validate(row.payload)
         except ValueError:
             continue
-        if (payload.record_type, payload.source_record_id) in tombstoned:
+        key = (payload.record_type, payload.source_record_id)
+        observation_order = (
+            payload.last_modified_at_epoch_ms or row.logical_clock,
+            row.logical_clock,
+            row.entity_id,
+        )
+        deleted_at = latest_tombstone.get(key)
+        if deleted_at is not None and observation_order <= deleted_at:
             continue
         records.append((row.entity_id, payload))
     return tuple(records)
