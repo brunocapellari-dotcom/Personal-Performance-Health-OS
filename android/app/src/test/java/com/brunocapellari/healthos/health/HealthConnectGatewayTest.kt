@@ -2,8 +2,10 @@ package com.brunocapellari.healthos.health
 
 import androidx.health.connect.client.records.SpeedRecord
 import androidx.health.connect.client.records.StepsRecord
+import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.metadata.Metadata
 import androidx.health.connect.client.testing.FakeHealthConnectClient
+import androidx.health.connect.client.testing.FakePermissionController
 import androidx.health.connect.client.units.Velocity
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -121,5 +123,30 @@ class HealthConnectGatewayTest {
         assertEquals(Metadata.RECORDING_METHOD_MANUAL_ENTRY, delta.recordingMethod)
         assertTrue(delta.lastModifiedAtEpochMillis > 0)
         assertTrue(delta.dataOriginPackage.isNotBlank())
+    }
+
+
+    @Test
+    fun partialCorePermissionStillProducesReadableTypes() = runBlocking {
+        val permissions = FakePermissionController(grantAll = false)
+        permissions.grantPermission(HealthPermission.getReadPermission(StepsRecord::class))
+        val fake = FakeHealthConnectClient(permissionController = permissions)
+        val gateway = HealthConnectGateway(fake)
+
+        assertTrue(gateway.hasAnyReadPermission())
+        assertFalse(gateway.hasCoreReadPermissions())
+        assertEquals(setOf(TrackedHealthType.STEPS), gateway.readableTypes())
+    }
+
+    @Test
+    fun optionalPerformancePermissionCanBeUsedWithoutCompleteCoreSet() = runBlocking {
+        val permissions = FakePermissionController(grantAll = false)
+        permissions.grantPermission(HealthPermission.getReadPermission(SpeedRecord::class))
+        val fake = FakeHealthConnectClient(permissionController = permissions)
+        val gateway = HealthConnectGateway(fake)
+
+        assertTrue(gateway.hasAnyReadPermission())
+        assertFalse(gateway.hasCoreReadPermissions())
+        assertEquals(setOf(TrackedHealthType.SPEED), gateway.readableTypes())
     }
 }
