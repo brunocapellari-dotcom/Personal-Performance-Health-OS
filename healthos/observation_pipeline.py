@@ -62,6 +62,7 @@ class ObservationPipelineResult:
     raw_count: int
     normalized_count: int
     canonical: tuple[Observation, ...]
+    source_version_suppressed_ids: tuple[str, ...]
     suppressed_ids: tuple[str, ...]
     quality_findings: tuple[DataQualityFinding, ...]
     missing_findings: tuple[MissingDataFinding, ...]
@@ -470,18 +471,53 @@ class ObservationPipeline:
         expectations: tuple[MissingDataExpectation, ...] = (),
         now: datetime | None = None,
     ) -> ObservationPipelineResult:
+        selected_records, version_suppressed = self._latest_source_versions(records)
         normalized = tuple(
             obs
-            for entity_id, payload in records
+            for entity_id, payload in selected_records
             for obs in self.normalizer.normalize(entity_id, payload)
         )
-        return self.run_observations(
+        result = self.run_observations(
             normalized,
             raw_count=len(records),
             source_priority=source_priority,
             expectations=expectations,
             now=now,
         )
+        return replace(result, source_version_suppressed_ids=version_suppressed)
+
+    @staticmethod
+    def _latest_source_versions(
+        records: tuple[tuple[str, HealthObservationPayload], ...],
+    ) -> tuple[tuple[tuple[str, HealthObservationPayload], ...], tuple[str, ...]]:
+        winners: dict[tuple[str, str, str], tuple[str, HealthObservationPayload]] = {}
+        suppressed: list[str] = []
+        for entity_id, payload in sorted(records, key=lambda item: item[0]):
+            key = (payload.data_origin_package, payload.record_type, payload.source_record_id)
+            current = winners.get(key)
+            if current is None:
+                winners[key] = (entity_id, payload)
+                continue
+            current_id, current_payload = current
+            incoming_order = (
+                payload.client_record_version,
+                payload.last_modified_at_epoch_ms or 0,
+                payload.observed_at_epoch_ms,
+                entity_id,
+            )
+            current_order = (
+                current_payload.client_record_version,
+                current_payload.last_modified_at_epoch_ms or 0,
+                current_payload.observed_at_epoch_ms,
+                current_id,
+            )
+            if incoming_order > current_order:
+                suppressed.append(current_id)
+                winners[key] = (entity_id, payload)
+            else:
+                suppressed.append(entity_id)
+        selected = tuple(sorted(winners.values(), key=lambda item: item[0]))
+        return selected, tuple(sorted(suppressed))
 
     def run_observations(
         self,
@@ -543,6 +579,7 @@ class ObservationPipeline:
             raw_count=len(observations) if raw_count is None else raw_count,
             normalized_count=len(observations),
             canonical=canonical,
+            source_version_suppressed_ids=(),
             suppressed_ids=dedup.suppressed_ids,
             quality_findings=report.findings,
             missing_findings=missing,
