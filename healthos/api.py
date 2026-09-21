@@ -503,6 +503,8 @@ def create_app(
                 "missing_findings": [],
                 "baselines": {},
                 "analytics": {},
+                "baseline_contract": {"passed": True, "findings": []},
+                "analytics_contract": {"passed": True, "findings": []},
             }
         return jsonable_encoder(
             {
@@ -520,6 +522,8 @@ def create_app(
                     metric: asdict(value)
                     for metric, value in sorted(pipeline.analytics.items())
                 },
+                "baseline_contract": asdict(pipeline.baseline_contract),
+                "analytics_contract": asdict(pipeline.analytics_contract),
             }
         )
 
