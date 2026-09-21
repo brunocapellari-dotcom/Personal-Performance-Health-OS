@@ -254,3 +254,90 @@ def test_goal_current_falls_back_to_health_connect_baseline() -> None:
         )
 
     assert goals[0].current == 101.5
+
+
+def test_persisted_source_priority_and_missing_expectations_drive_health_pipeline() -> None:
+    settings = _settings()
+    database = Database(settings)
+    database.create_schema_for_tests(settings)
+    observed = datetime(2026, 9, 21, 8, 0, tzinfo=UTC)
+    scale_source = "health_connect:com.synthetic.scale:synthetic:scale-x:1"
+
+    with database.session() as db:
+        push_changes(
+            db,
+            settings,
+            device_id="synthetic-device",
+            changes=(
+                IncomingChange(
+                    "quality-priority-1",
+                    "health_source_priority",
+                    "default",
+                    1,
+                    False,
+                    {"ordered_source_ids": [scale_source]},
+                ),
+                IncomingChange(
+                    "quality-expectation-1",
+                    "metric_expectation",
+                    "sleep-duration",
+                    1,
+                    False,
+                    {"metric": "sleep_duration_min", "max_age_hours": 48, "enabled": True},
+                ),
+                IncomingChange(
+                    "quality-weight-phone",
+                    "observation",
+                    "weight-phone",
+                    1,
+                    False,
+                    {
+                        "record_type": "weight",
+                        "source_record_id": "weight-phone",
+                        "observed_at_epoch_ms": int(observed.timestamp() * 1000),
+                        "data_origin_package": "com.synthetic.phone",
+                        "last_modified_at_epoch_ms": int(observed.timestamp() * 1000),
+                        "client_record_version": 1,
+                        "recording_method": 3,
+                        "health_connect_deleted": False,
+                        "data": {"kilograms": 100.0, "time": observed.isoformat()},
+                    },
+                ),
+                IncomingChange(
+                    "quality-weight-scale",
+                    "observation",
+                    "weight-scale",
+                    1,
+                    False,
+                    {
+                        "record_type": "weight",
+                        "source_record_id": "weight-scale",
+                        "observed_at_epoch_ms": int((observed + timedelta(seconds=20)).timestamp() * 1000),
+                        "data_origin_package": "com.synthetic.scale",
+                        "last_modified_at_epoch_ms": int((observed + timedelta(seconds=20)).timestamp() * 1000),
+                        "client_record_version": 1,
+                        "recording_method": 2,
+                        "device_type": 1,
+                        "device_manufacturer": "Synthetic",
+                        "device_model": "Scale-X",
+                        "health_connect_deleted": False,
+                        "data": {
+                            "kilograms": 100.02,
+                            "time": (observed + timedelta(seconds=20)).isoformat(),
+                        },
+                    },
+                ),
+            ),
+        )
+
+    with database.session() as db:
+        pipeline = PlanningStateResolver().health_pipeline(
+            db,
+            now=datetime(2026, 9, 21, 12, 0, tzinfo=UTC),
+        )
+
+    assert pipeline is not None
+    assert len(pipeline.canonical) == 1
+    assert pipeline.canonical[0].source_id == scale_source
+    assert len(pipeline.suppressed_ids) == 1
+    assert {finding.metric for finding in pipeline.missing_findings} == {"sleep_duration_min"}
