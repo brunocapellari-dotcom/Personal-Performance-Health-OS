@@ -20,6 +20,7 @@ import androidx.health.connect.client.records.StepsCadenceRecord
 import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
 import androidx.health.connect.client.records.WeightRecord
+import androidx.health.connect.client.records.Vo2MaxRecord
 import androidx.health.connect.client.records.metadata.Metadata
 import androidx.health.connect.client.request.ChangesTokenRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
@@ -52,6 +53,7 @@ enum class TrackedHealthType(
     SPEED("speed", SpeedRecord::class, HealthMetricTier.PERFORMANCE),
     ELEVATION_GAINED("elevation_gained", ElevationGainedRecord::class, HealthMetricTier.PERFORMANCE),
     POWER("power", PowerRecord::class, HealthMetricTier.PERFORMANCE),
+    VO2_MAX("vo2_max", Vo2MaxRecord::class, HealthMetricTier.PERFORMANCE),
 }
 
 data class HealthDelta(
@@ -185,6 +187,7 @@ class HealthConnectGateway private constructor(
         TrackedHealthType.ELEVATION_GAINED ->
             readAll(ElevationGainedRecord::class, start, end).map { normalize(type, it) }
         TrackedHealthType.POWER -> readAll(PowerRecord::class, start, end).map { normalize(type, it) }
+        TrackedHealthType.VO2_MAX -> readAll(Vo2MaxRecord::class, start, end).map { normalize(type, it) }
         TrackedHealthType.ACTIVE_CALORIES ->
             readAll(ActiveCaloriesBurnedRecord::class, start, end).map { normalize(type, it) }
         TrackedHealthType.TOTAL_CALORIES ->
@@ -392,6 +395,12 @@ class HealthConnectGateway private constructor(
                     },
                 )
                 record.endTime.toEpochMilli()
+            }
+            is Vo2MaxRecord -> {
+                payload.put("millilitersPerMinuteKilogram", record.vo2MillilitersPerMinuteKilogram)
+                payload.put("measurementMethod", record.measurementMethod)
+                payload.put("time", record.time.toString())
+                record.time.toEpochMilli()
             }
             is ActiveCaloriesBurnedRecord -> {
                 payload.put("kilocalories", record.energy.inKilocalories)
