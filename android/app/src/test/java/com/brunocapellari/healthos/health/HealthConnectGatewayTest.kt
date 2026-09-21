@@ -86,4 +86,38 @@ class HealthConnectGatewayTest {
         assertEquals(1, deltas.size)
         assertTrue(deltas.single().payloadJson.contains("\"count\":1800"))
     }
+
+
+    @Test
+    fun speedNormalizationPreservesSeriesAndProvenance() = runBlocking {
+        val fake = FakeHealthConnectClient()
+        val gateway = HealthConnectGateway(fake)
+        val start = Instant.parse("2027-03-01T10:00:00Z")
+        val end = Instant.parse("2027-03-01T10:01:00Z")
+        val token = gateway.newToken(TrackedHealthType.SPEED)
+
+        fake.insertRecords(
+            listOf(
+                SpeedRecord(
+                    startTime = start,
+                    startZoneOffset = null,
+                    endTime = end,
+                    endZoneOffset = null,
+                    samples = listOf(
+                        SpeedRecord.Sample(start.plusSeconds(30), Velocity.metersPerSecond(3.5)),
+                    ),
+                    metadata = Metadata.manualEntry(),
+                ),
+            ),
+        )
+
+        val batch = gateway.drain(TrackedHealthType.SPEED, token)
+        val delta = batch.deltas.single()
+        assertEquals(TrackedHealthType.SPEED, delta.recordType)
+        assertTrue(delta.payloadJson.contains("\"metersPerSecond\":3.5"))
+        assertTrue(delta.payloadJson.contains("\"_provenance\""))
+        assertEquals(Metadata.RECORDING_METHOD_MANUAL_ENTRY, delta.recordingMethod)
+        assertTrue(delta.lastModifiedAtEpochMillis > 0)
+        assertTrue(delta.dataOriginPackage.isNotBlank())
+    }
 }
