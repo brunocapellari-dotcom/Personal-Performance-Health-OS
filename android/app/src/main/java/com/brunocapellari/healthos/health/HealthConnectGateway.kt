@@ -348,3 +348,4 @@ class HealthConnectGateway private constructor(
         .put("deviceType", metadata.device?.type ?: JSONObject.NULL)
         .put("deviceManufacturer", metadata.device?.manufacturer ?: JSONObject.NULL)
         .put("deviceModel", metadata.device?.model ?: JSONObject.NULL)
+}
