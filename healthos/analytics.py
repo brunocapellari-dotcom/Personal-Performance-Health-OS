@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from statistics import mean
+from datetime import UTC, datetime, timedelta
+from statistics import mean, median
 from typing import cast
 
 from .data_quality import SourceResolver
@@ -16,6 +16,75 @@ from .domain import (
     TrainingResponse,
 )
 from .engines import StrengthEngine
+
+
+@dataclass(frozen=True)
+class RecoverySignal:
+    metric: str
+    latest_value: float
+    baseline_value: float
+    delta_pct: float
+    samples_in_baseline: int
+    latest_at: datetime
+
+
+class RecoverySignalEngine:
+    """Derive objective recovery deltas without contaminating the baseline with the latest reading."""
+
+    def derive(
+        self,
+        observations: tuple[Observation, ...],
+        metric: str,
+        *,
+        now: datetime | None = None,
+        lookback: timedelta = timedelta(days=28),
+        recent_exclusion: timedelta = timedelta(hours=18),
+        min_baseline_samples: int = 3,
+    ) -> RecoverySignal | None:
+        now = now or datetime.now(UTC)
+        if lookback.total_seconds() <= 0 or recent_exclusion.total_seconds() < 0:
+            raise ValueError("invalid recovery signal windows")
+        if min_baseline_samples < 1:
+            raise ValueError("min_baseline_samples must be positive")
+
+        eligible = tuple(
+            sorted(
+                (
+                    obs
+                    for obs in observations
+                    if obs.metric == metric
+                    and isinstance(obs.value, (int, float))
+                    and obs.observed_at <= now
+                    and obs.observed_at >= now - lookback
+                ),
+                key=lambda item: item.observed_at,
+            )
+        )
+        if not eligible:
+            return None
+
+        latest = eligible[-1]
+        cutoff = latest.observed_at - recent_exclusion
+        baseline_values = tuple(
+            float(obs.value)
+            for obs in eligible
+            if obs.observed_at < cutoff
+        )
+        if len(baseline_values) < min_baseline_samples:
+            return None
+        baseline = float(median(baseline_values))
+        if baseline == 0:
+            return None
+        latest_value = float(latest.value)
+        delta = (latest_value - baseline) / abs(baseline) * 100.0
+        return RecoverySignal(
+            metric=metric,
+            latest_value=round(latest_value, 4),
+            baseline_value=round(baseline, 4),
+            delta_pct=round(delta, 2),
+            samples_in_baseline=len(baseline_values),
+            latest_at=latest.observed_at,
+        )
 
 
 @dataclass(frozen=True)
