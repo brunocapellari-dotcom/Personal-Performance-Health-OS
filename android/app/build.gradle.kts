@@ -63,7 +63,7 @@ room3 {
     schemaDirectory("$projectDir/schemas")
 }
 
-val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
+val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
 
 dependencies {
     implementation(composeBom)
