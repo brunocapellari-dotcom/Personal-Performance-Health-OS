@@ -2,6 +2,7 @@ package com.brunocapellari.healthos.health
 
 import android.content.Context
 import androidx.health.connect.client.HealthConnectClient
+import androidx.health.connect.client.aggregate.AggregateMetric
 import androidx.health.connect.client.changes.DeletionChange
 import androidx.health.connect.client.changes.UpsertionChange
 import androidx.health.connect.client.request.AggregateRequest
@@ -195,42 +196,76 @@ class HealthConnectGateway private constructor(
     }
 
     suspend fun aggregateExerciseSession(uid: String): ExerciseAggregate {
+        val readable = readableTypes()
+        require(TrackedHealthType.EXERCISE in readable) {
+            "Exercise read permission is required for exercise-session aggregates"
+        }
+
         val session = client.readRecord(ExerciseSessionRecord::class, uid).record
-        val timeRange = TimeRangeFilter.between(session.startTime, session.endTime)
+        val metrics = mutableSetOf<AggregateMetric<*>>(ExerciseSessionRecord.EXERCISE_DURATION_TOTAL)
+        if (TrackedHealthType.STEPS in readable) metrics += StepsRecord.COUNT_TOTAL
+        if (TrackedHealthType.DISTANCE in readable) metrics += DistanceRecord.DISTANCE_TOTAL
+        if (TrackedHealthType.TOTAL_CALORIES in readable) metrics += TotalCaloriesBurnedRecord.ENERGY_TOTAL
+        if (TrackedHealthType.ACTIVE_CALORIES in readable) metrics += ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL
+        if (TrackedHealthType.HEART_RATE in readable) {
+            metrics += HeartRateRecord.BPM_MIN
+            metrics += HeartRateRecord.BPM_MAX
+            metrics += HeartRateRecord.BPM_AVG
+        }
+        if (TrackedHealthType.SPEED in readable) metrics += SpeedRecord.SPEED_AVG
+        if (TrackedHealthType.ELEVATION_GAINED in readable) metrics += ElevationGainedRecord.ELEVATION_GAINED_TOTAL
+        if (TrackedHealthType.POWER in readable) metrics += PowerRecord.POWER_AVG
+        if (TrackedHealthType.STEPS_CADENCE in readable) metrics += StepsCadenceRecord.RATE_AVG
+
         val response = client.aggregate(
             AggregateRequest(
-                metrics = setOf(
-                    ExerciseSessionRecord.EXERCISE_DURATION_TOTAL,
-                    StepsRecord.COUNT_TOTAL,
-                    DistanceRecord.DISTANCE_TOTAL,
-                    TotalCaloriesBurnedRecord.ENERGY_TOTAL,
-                    ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL,
-                    HeartRateRecord.BPM_MIN,
-                    HeartRateRecord.BPM_MAX,
-                    HeartRateRecord.BPM_AVG,
-                    SpeedRecord.SPEED_AVG,
-                    ElevationGainedRecord.ELEVATION_GAINED_TOTAL,
-                    PowerRecord.POWER_AVG,
-                    StepsCadenceRecord.RATE_AVG,
-                ),
-                timeRangeFilter = timeRange,
+                metrics = metrics,
+                timeRangeFilter = TimeRangeFilter.between(session.startTime, session.endTime),
                 dataOriginFilter = setOf(session.metadata.dataOrigin),
             ),
         )
         return ExerciseAggregate(
             sourcePackage = session.metadata.dataOrigin.packageName,
             durationSeconds = response[ExerciseSessionRecord.EXERCISE_DURATION_TOTAL]?.seconds,
-            steps = response[StepsRecord.COUNT_TOTAL],
-            distanceMeters = response[DistanceRecord.DISTANCE_TOTAL]?.inMeters,
-            totalCaloriesKcal = response[TotalCaloriesBurnedRecord.ENERGY_TOTAL]?.inKilocalories,
-            activeCaloriesKcal = response[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories,
-            minHeartRateBpm = response[HeartRateRecord.BPM_MIN],
-            maxHeartRateBpm = response[HeartRateRecord.BPM_MAX],
-            avgHeartRateBpm = response[HeartRateRecord.BPM_AVG],
-            avgSpeedMetersPerSecond = response[SpeedRecord.SPEED_AVG]?.inMetersPerSecond,
-            elevationGainedMeters = response[ElevationGainedRecord.ELEVATION_GAINED_TOTAL]?.inMeters,
-            avgPowerWatts = response[PowerRecord.POWER_AVG]?.inWatts,
-            avgStepsCadence = response[StepsCadenceRecord.RATE_AVG],
+            steps = if (TrackedHealthType.STEPS in readable) response[StepsRecord.COUNT_TOTAL] else null,
+            distanceMeters = if (TrackedHealthType.DISTANCE in readable) {
+                response[DistanceRecord.DISTANCE_TOTAL]?.inMeters
+            } else {
+                null
+            },
+            totalCaloriesKcal = if (TrackedHealthType.TOTAL_CALORIES in readable) {
+                response[TotalCaloriesBurnedRecord.ENERGY_TOTAL]?.inKilocalories
+            } else {
+                null
+            },
+            activeCaloriesKcal = if (TrackedHealthType.ACTIVE_CALORIES in readable) {
+                response[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories
+            } else {
+                null
+            },
+            minHeartRateBpm = if (TrackedHealthType.HEART_RATE in readable) response[HeartRateRecord.BPM_MIN] else null,
+            maxHeartRateBpm = if (TrackedHealthType.HEART_RATE in readable) response[HeartRateRecord.BPM_MAX] else null,
+            avgHeartRateBpm = if (TrackedHealthType.HEART_RATE in readable) response[HeartRateRecord.BPM_AVG] else null,
+            avgSpeedMetersPerSecond = if (TrackedHealthType.SPEED in readable) {
+                response[SpeedRecord.SPEED_AVG]?.inMetersPerSecond
+            } else {
+                null
+            },
+            elevationGainedMeters = if (TrackedHealthType.ELEVATION_GAINED in readable) {
+                response[ElevationGainedRecord.ELEVATION_GAINED_TOTAL]?.inMeters
+            } else {
+                null
+            },
+            avgPowerWatts = if (TrackedHealthType.POWER in readable) {
+                response[PowerRecord.POWER_AVG]?.inWatts
+            } else {
+                null
+            },
+            avgStepsCadence = if (TrackedHealthType.STEPS_CADENCE in readable) {
+                response[StepsCadenceRecord.RATE_AVG]
+            } else {
+                null
+            },
         )
     }
 
