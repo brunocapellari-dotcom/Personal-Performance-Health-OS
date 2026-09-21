@@ -345,3 +345,72 @@ def test_minimal_next_block_reads_synced_state_and_cache_tracks_state_changes() 
     assert changed.status_code == 200, changed.text
     assert changed.json()["snapshot_id"] != first.json()["snapshot_id"]
     assert changed.json()["plan"]["metadata"]["goal_gaps"]["canonical-distance"]["absolute_gap"] == 11.0
+
+
+def test_observation_timeline_and_source_inventory_are_provenance_aware() -> None:
+    client = _client()
+    payload = {
+        "changes": [
+            {
+                "change_id": "timeline-weight-01",
+                "entity_type": "observation",
+                "entity_id": "timeline-weight-entity",
+                "logical_clock": 1,
+                "payload": {
+                    "record_type": "weight",
+                    "source_record_id": "weight-source-1",
+                    "observed_at_epoch_ms": 1795179600000,
+                    "data_origin_package": "com.synthetic.scale",
+                    "last_modified_at_epoch_ms": 1795179600000,
+                    "client_record_id": "client-weight-1",
+                    "client_record_version": 1,
+                    "recording_method": 2,
+                    "device_type": 1,
+                    "device_manufacturer": "Synthetic",
+                    "device_model": "Scale-X",
+                    "health_connect_deleted": False,
+                    "data": {
+                        "kilograms": 99.5,
+                        "time": "2026-11-20T09:00:00+00:00",
+                    },
+                },
+            },
+            {
+                "change_id": "timeline-hrv-0001",
+                "entity_type": "observation",
+                "entity_id": "timeline-hrv-entity",
+                "logical_clock": 2,
+                "payload": {
+                    "record_type": "heart_rate_variability_rmssd",
+                    "source_record_id": "hrv-source-1",
+                    "observed_at_epoch_ms": 1795179600000,
+                    "data_origin_package": "com.synthetic.watch",
+                    "last_modified_at_epoch_ms": 1795179600000,
+                    "client_record_version": 1,
+                    "recording_method": 2,
+                    "health_connect_deleted": False,
+                    "data": {
+                        "rmssdMillis": 48.0,
+                        "time": "2026-11-20T09:00:00+00:00",
+                    },
+                },
+            },
+        ]
+    }
+    pushed = client.post("/v1/sync/push", headers=_headers(), json=payload)
+    assert pushed.status_code == 200, pushed.text
+
+    timeline = client.get("/v1/observations/timeline?metric=weight_kg", headers=_headers())
+    assert timeline.status_code == 200, timeline.text
+    assert timeline.json()["count"] == 1
+    item = timeline.json()["observations"][0]
+    assert item["metric"] == "weight_kg"
+    assert item["value"] == 99.5
+    assert item["source_id"].startswith("health_connect:com.synthetic.scale")
+    assert item["metadata"]["source_record_id"] == "weight-source-1"
+
+    sources = client.get("/v1/observations/sources", headers=_headers())
+    assert sources.status_code == 200, sources.text
+    source_ids = {item["source_id"] for item in sources.json()["sources"]}
+    assert any(value.startswith("health_connect:com.synthetic.scale") for value in source_ids)
+    assert any(value.startswith("health_connect:com.synthetic.watch") for value in source_ids)
