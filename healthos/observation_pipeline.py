@@ -26,7 +26,7 @@ from .data_quality import (
     SourceResolver,
 )
 from .domain import Observation
-from .entity_payloads import HealthObservationPayload
+from .entity_payloads import HealthObservationPayload, HealthSourcePriorityPayload, MetricExpectationPayload
 from .models import EntityRecordModel
 
 
@@ -572,3 +572,51 @@ def load_health_connect_records(db: Session) -> tuple[tuple[str, HealthObservati
             continue
         records.append((row.entity_id, payload))
     return tuple(records)
+
+
+def load_health_quality_config(
+    db: Session,
+) -> tuple[tuple[str, ...], tuple[MissingDataExpectation, ...]]:
+    priority_row = db.scalar(
+        select(EntityRecordModel)
+        .where(
+            EntityRecordModel.entity_type == "health_source_priority",
+            EntityRecordModel.deleted.is_(False),
+        )
+        .order_by(EntityRecordModel.updated_at.desc(), EntityRecordModel.entity_id.asc())
+        .limit(1)
+    )
+    source_priority: tuple[str, ...] = ()
+    if priority_row is not None:
+        try:
+            source_priority = tuple(
+                HealthSourcePriorityPayload.model_validate(priority_row.payload).ordered_source_ids
+            )
+        except ValueError:
+            source_priority = ()
+
+    expectations: list[MissingDataExpectation] = []
+    rows = db.scalars(
+        select(EntityRecordModel)
+        .where(
+            EntityRecordModel.entity_type == "metric_expectation",
+            EntityRecordModel.deleted.is_(False),
+        )
+        .order_by(EntityRecordModel.updated_at.desc(), EntityRecordModel.entity_id.asc())
+    ).all()
+    seen_metrics: set[str] = set()
+    for row in rows:
+        try:
+            payload = MetricExpectationPayload.model_validate(row.payload)
+        except ValueError:
+            continue
+        if payload.metric in seen_metrics or not payload.enabled:
+            continue
+        seen_metrics.add(payload.metric)
+        expectations.append(
+            MissingDataExpectation(
+                metric=payload.metric,
+                max_age=timedelta(hours=payload.max_age_hours),
+            )
+        )
+    return source_priority, tuple(expectations)
