@@ -490,6 +490,76 @@ def create_app(
         db.flush()
         return NextBlockResponse(snapshot_id=snapshot.snapshot_id, plan=plan_json, audit=audit_json)
 
+    @app.get("/v1/observations/timeline")
+    def observations_timeline(
+        db: DbSession,
+        actor: Actor,
+        metric: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+        limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    ) -> dict[str, object]:
+        del actor
+        pipeline = PlanningStateResolver().health_pipeline(db)
+        if pipeline is None:
+            return {"observations": [], "count": 0}
+        filtered = (
+            tuple(item for item in pipeline.canonical if item.metric == metric)
+            if metric is not None
+            else pipeline.canonical
+        )
+        selected = tuple(sorted(filtered, key=lambda item: item.observed_at, reverse=True)[:limit])
+        return jsonable_encoder(
+            {
+                "observations": [
+                    {
+                        "observation_id": item.observation_id,
+                        "metric": item.metric,
+                        "value": item.value,
+                        "unit": item.unit,
+                        "observed_at": item.observed_at,
+                        "recorded_at": item.recorded_at,
+                        "source_id": item.source_id,
+                        "source_type": item.source_type,
+                        "quality": item.quality,
+                        "confidence": item.confidence,
+                        "metadata": item.metadata,
+                    }
+                    for item in selected
+                ],
+                "count": len(selected),
+            }
+        )
+
+    @app.get("/v1/observations/sources")
+    def observation_sources(db: DbSession, actor: Actor) -> dict[str, object]:
+        del actor
+        pipeline = PlanningStateResolver().health_pipeline(db)
+        if pipeline is None:
+            return {"sources": []}
+
+        grouped: dict[str, list[object]] = {}
+        for item in pipeline.canonical:
+            grouped.setdefault(item.source_id, []).append(item)
+
+        sources: list[dict[str, object]] = []
+        for source_id, raw_items in sorted(grouped.items()):
+            items = [item for item in raw_items if hasattr(item, "metric")]
+            metrics = sorted({item.metric for item in items})
+            confidences = [item.confidence for item in items if item.confidence is not None]
+            latest_at = max(item.observed_at for item in items)
+            sources.append(
+                {
+                    "source_id": source_id,
+                    "source_type": items[0].source_type,
+                    "metrics": metrics,
+                    "observation_count": len(items),
+                    "latest_at": latest_at,
+                    "avg_confidence": None
+                    if not confidences
+                    else round(sum(confidences) / len(confidences), 3),
+                }
+            )
+        return jsonable_encoder({"sources": sources})
+
     @app.get("/v1/observations/summary")
     def observations_summary(db: DbSession, actor: Actor) -> dict[str, object]:
         del actor
