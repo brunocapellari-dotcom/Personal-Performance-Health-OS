@@ -85,8 +85,14 @@ class HealthDataRepository(
     private val identity: DeviceIdentity,
     private val backfillPolicy: HealthBackfillPolicy = HealthBackfillPolicy(),
 ) {
-    suspend fun enroll(bootstrapToken: String) {
-        api.enroll(bootstrapToken, identity)
+    suspend fun enroll(linkToken: String) {
+        api.enroll(linkToken, identity)
+    }
+
+    suspend fun createOwnerPairingToken(ttlSeconds: Int = 300): JSONObject {
+        require(ttlSeconds in 30..900) { "pairing token TTL must be between 30 and 900 seconds" }
+        val token = api.authenticate(identity)
+        return api.createPairingToken(token, role = "owner_device", ttlSeconds = ttlSeconds)
     }
 
     suspend fun fullSync(mode: HealthIngestionMode = HealthIngestionMode.FOREGROUND): SyncSummary {
