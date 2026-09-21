@@ -54,6 +54,7 @@ from .domain import (
     Event,
     Goal,
     NutritionTrend,
+    Observation,
     ReadinessInput,
     TrainingEnvironment,
     TrainingResponse,
@@ -536,13 +537,12 @@ def create_app(
         if pipeline is None:
             return {"sources": []}
 
-        grouped: dict[str, list[object]] = {}
+        grouped: dict[str, list[Observation]] = {}
         for item in pipeline.canonical:
             grouped.setdefault(item.source_id, []).append(item)
 
         sources: list[dict[str, object]] = []
-        for source_id, raw_items in sorted(grouped.items()):
-            items = [item for item in raw_items if hasattr(item, "metric")]
+        for source_id, items in sorted(grouped.items()):
             metrics = sorted({item.metric for item in items})
             confidences = [item.confidence for item in items if item.confidence is not None]
             latest_at = max(item.observed_at for item in items)
