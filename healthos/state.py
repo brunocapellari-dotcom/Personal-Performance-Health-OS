@@ -36,6 +36,7 @@ from .entity_payloads import (
 )
 from .models import EntityRecordModel, PlanSnapshotModel
 from .observation_pipeline import (
+    ADDITIVE_DAILY_METRICS,
     ObservationPipeline,
     ObservationPipelineResult,
     load_health_connect_records,
@@ -103,6 +104,11 @@ class PlanningStateResolver:
         assessments = self._latest_assessments(db)
         resolved_pipeline = pipeline if pipeline is not None else self.health_pipeline(db, now=now)
         baselines = resolved_pipeline.baselines if resolved_pipeline is not None else {}
+        latest_by_metric: dict[str, float] = {}
+        if resolved_pipeline is not None:
+            for observation in resolved_pipeline.canonical:
+                if isinstance(observation.value, (int, float)):
+                    latest_by_metric[observation.metric] = float(observation.value)
 
         goals: list[Goal] = []
         for row in self._active(db, "goal"):
@@ -110,8 +116,16 @@ class PlanningStateResolver:
             current = payload.current
             if current is None and payload.metric in assessments:
                 current = assessments[payload.metric]
+            if (
+                current is None
+                and payload.metric not in ADDITIVE_DAILY_METRICS
+                and payload.metric in latest_by_metric
+            ):
+                current = latest_by_metric[payload.metric]
             if current is None and payload.metric in baselines:
-                current = baselines[payload.metric].value
+                baseline = baselines[payload.metric]
+                if payload.metric not in ADDITIVE_DAILY_METRICS or baseline.day_count >= 3:
+                    current = baseline.value
             goals.append(
                 Goal(
                     goal_id=payload.goal_id,
