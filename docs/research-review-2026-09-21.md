@@ -63,7 +63,7 @@ The optional tier prevents denial of a specialist permission such as power or sp
 
 The canonical path is:
 
-`Health Connect → source identification → normalization → quality/confidence → duplicate resolution → timeline → missing-data detection → baseline → analytics`
+`Health Connect → source identification → source-version dedup → normalization → quality/confidence → cross-source duplicate resolution → timeline → missing-data detection → baseline → analytics`
 
 ### Raw evidence
 
