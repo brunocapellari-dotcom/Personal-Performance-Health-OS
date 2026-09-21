@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from healthos.analytics import AssessmentEngine, BodyTrendEngine, PlannedVsPerformedEngine, SourceResolver, StrengthHistoryEngine
+from healthos.analytics import AssessmentEngine, BodyTrendEngine, PlannedVsPerformedEngine, RecoverySignalEngine, SourceResolver, StrengthHistoryEngine
 from healthos.domain import ExercisePrescription, Observation, PerformedExercise, PerformedSession, PerformedSet, Phase, SessionPlan
 
 
@@ -101,3 +101,55 @@ def test_strength_history_reduction_snaps_to_available_load() -> None:
     )
     assert recommendations["goblet_squat"].next_load_kg == 18.0
     assert recommendations["goblet_squat"].rationale == "performance_regression_reduce_5pct"
+
+
+def test_recovery_signal_excludes_recent_measurement_from_baseline() -> None:
+    now = datetime(2026, 9, 21, 8, 0, tzinfo=UTC)
+    observations = tuple(
+        Observation(
+            f"rhr-{index}",
+            "resting_heart_rate_bpm",
+            value,
+            "bpm",
+            now - timedelta(days=days),
+            now - timedelta(days=days),
+            "watch",
+            "HEALTH_CONNECT",
+            confidence=0.95,
+            quality="high",
+        )
+        for index, (days, value) in enumerate(((7, 60.0), (5, 61.0), (3, 59.0), (0, 66.0)))
+    )
+    signal = RecoverySignalEngine().derive(observations, "resting_heart_rate_bpm", now=now)
+    assert signal is not None
+    assert signal.baseline_value == 60.0
+    assert signal.latest_value == 66.0
+    assert signal.delta_pct == 10.0
+    assert signal.samples_in_baseline == 3
+
+
+def test_recovery_signal_requires_enough_prior_samples() -> None:
+    now = datetime(2026, 9, 21, 8, 0, tzinfo=UTC)
+    observations = (
+        Observation(
+            "hrv-old",
+            "hrv_rmssd_ms",
+            50.0,
+            "ms",
+            now - timedelta(days=2),
+            now - timedelta(days=2),
+            "watch",
+            "HEALTH_CONNECT",
+        ),
+        Observation(
+            "hrv-new",
+            "hrv_rmssd_ms",
+            40.0,
+            "ms",
+            now,
+            now,
+            "watch",
+            "HEALTH_CONNECT",
+        ),
+    )
+    assert RecoverySignalEngine().derive(observations, "hrv_rmssd_ms", now=now) is None
