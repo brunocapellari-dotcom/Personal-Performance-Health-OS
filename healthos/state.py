@@ -35,7 +35,12 @@ from .entity_payloads import (
     TrainingResponsePayload,
 )
 from .models import EntityRecordModel, PlanSnapshotModel
-from .observation_pipeline import ObservationPipeline, ObservationPipelineResult, load_health_connect_records
+from .observation_pipeline import (
+    ObservationPipeline,
+    ObservationPipelineResult,
+    load_health_connect_records,
+    load_health_quality_config,
+)
 
 
 @dataclass(frozen=True)
@@ -125,7 +130,13 @@ class PlanningStateResolver:
         records = load_health_connect_records(db)
         if not records:
             return None
-        return ObservationPipeline().run_health_connect(records, now=now)
+        source_priority, expectations = load_health_quality_config(db)
+        return ObservationPipeline().run_health_connect(
+            records,
+            source_priority=source_priority,
+            expectations=expectations,
+            now=now,
+        )
 
     def environment(self, db: Session) -> TrainingEnvironment | None:
         row = self._latest(db, "training_environment")
