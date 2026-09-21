@@ -5,7 +5,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .analytics import StrengthHistoryEngine, TrainingHistoryEngine
+from .analytics import RecoverySignalEngine, StrengthHistoryEngine, TrainingHistoryEngine
 from .domain import (
     AvailabilityWindow,
     Environment,
@@ -58,13 +58,14 @@ class ResolvedPlanningState:
 class PlanningStateResolver:
     def resolve(self, db: Session, *, today: date, weeks: int) -> ResolvedPlanningState:
         planning_now = datetime(today.year, today.month, today.day, 23, 59, 59, tzinfo=UTC)
-        goals = self.goals(db, now=planning_now)
+        health_pipeline = self.health_pipeline(db, now=planning_now)
+        goals = self.goals(db, now=planning_now, pipeline=health_pipeline)
         if not goals:
             raise ValueError("no active goals are synchronized")
         environment = self.environment(db)
         if environment is None:
             raise ValueError("no active training environment is synchronized")
-        readiness = self.readiness(db)
+        readiness = self.readiness(db, now=planning_now, pipeline=health_pipeline)
         if readiness is None:
             raise ValueError("no readiness check-in is synchronized")
 
@@ -92,10 +93,16 @@ class PlanningStateResolver:
         rows = self._active(db, entity_type)
         return rows[0] if rows else None
 
-    def goals(self, db: Session, *, now: datetime | None = None) -> tuple[Goal, ...]:
+    def goals(
+        self,
+        db: Session,
+        *,
+        now: datetime | None = None,
+        pipeline: ObservationPipelineResult | None = None,
+    ) -> tuple[Goal, ...]:
         assessments = self._latest_assessments(db)
-        pipeline = self.health_pipeline(db, now=now)
-        baselines = pipeline.baselines if pipeline is not None else {}
+        resolved_pipeline = pipeline if pipeline is not None else self.health_pipeline(db, now=now)
+        baselines = resolved_pipeline.baselines if resolved_pipeline is not None else {}
 
         goals: list[Goal] = []
         for row in self._active(db, "goal"):
@@ -154,11 +161,38 @@ class PlanningStateResolver:
             load_options_kg=tuple(sorted(payload.load_options_kg)),
         )
 
-    def readiness(self, db: Session) -> ReadinessInput | None:
+    def readiness(
+        self,
+        db: Session,
+        *,
+        now: datetime | None = None,
+        pipeline: ObservationPipelineResult | None = None,
+    ) -> ReadinessInput | None:
         row = self._latest(db, "readiness")
         if row is None:
             return None
         payload = ReadinessPayload.model_validate(row.payload)
+        resolved_pipeline = pipeline if pipeline is not None else self.health_pipeline(db, now=now)
+        resting_hr_delta_pct = payload.resting_hr_delta_pct
+        hrv_delta_pct = payload.hrv_delta_pct
+        if resolved_pipeline is not None:
+            engine = RecoverySignalEngine()
+            if resting_hr_delta_pct is None:
+                signal = engine.derive(
+                    resolved_pipeline.canonical,
+                    "resting_heart_rate_bpm",
+                    now=now,
+                )
+                if signal is not None:
+                    resting_hr_delta_pct = signal.delta_pct
+            if hrv_delta_pct is None:
+                signal = engine.derive(
+                    resolved_pipeline.canonical,
+                    "hrv_rmssd_ms",
+                    now=now,
+                )
+                if signal is not None:
+                    hrv_delta_pct = signal.delta_pct
         return ReadinessInput(
             sleep_hours=payload.sleep_hours,
             sleep_quality_1_5=payload.sleep_quality_1_5,
@@ -166,8 +200,8 @@ class PlanningStateResolver:
             fatigue_1_5=payload.fatigue_1_5,
             soreness_1_5=payload.soreness_1_5,
             stress_1_5=payload.stress_1_5,
-            resting_hr_delta_pct=payload.resting_hr_delta_pct,
-            hrv_delta_pct=payload.hrv_delta_pct,
+            resting_hr_delta_pct=resting_hr_delta_pct,
+            hrv_delta_pct=hrv_delta_pct,
             pain_flag=payload.pain_flag,
         )
 
