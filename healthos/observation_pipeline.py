@@ -83,6 +83,7 @@ PLAUSIBLE_RANGES: dict[str, tuple[float, float]] = {
     "speed_m_s": (0.0, 100.0),
     "elevation_gained_m": (-10_000.0, 100_000.0),
     "power_w": (0.0, 5000.0),
+    "vo2_max_ml_kg_min": (5.0, 100.0),
     "active_calories_kcal": (0.0, 20_000.0),
     "total_calories_kcal": (0.0, 30_000.0),
 }
@@ -99,6 +100,7 @@ DUPLICATE_POLICIES: dict[str, DuplicatePolicy] = {
     "speed_m_s": DuplicatePolicy(timedelta(seconds=2), 0.05),
     "elevation_gained_m": DuplicatePolicy(timedelta(seconds=60), 0.5),
     "power_w": DuplicatePolicy(timedelta(seconds=2), 2.0),
+    "vo2_max_ml_kg_min": DuplicatePolicy(timedelta(minutes=5), 0.2),
     "active_calories_kcal": DuplicatePolicy(timedelta(seconds=60), 1.0),
     "total_calories_kcal": DuplicatePolicy(timedelta(seconds=60), 1.0),
 }
@@ -272,6 +274,16 @@ class HealthConnectNormalizer:
                 metric="power_w",
                 unit="W",
                 fallback_time=fallback_time,
+            )
+        if record_type == "vo2_max":
+            return (
+                observation(
+                    "vo2_max_ml_kg_min",
+                    float(data["millilitersPerMinuteKilogram"]),
+                    "ml/kg/min",
+                    self._time(data.get("time"), fallback_time),
+                    extra_metadata={"measurement_method": data.get("measurementMethod")},
+                ),
             )
         if record_type == "active_calories":
             return (
