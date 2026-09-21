@@ -24,8 +24,14 @@ data class HealthBackfillPolicy(
     val recoveryMinimumDays: Long = 30,
     val historyDaysByType: Map<TrackedHealthType, Long> = mapOf(
         TrackedHealthType.HEART_RATE to 90,
+        TrackedHealthType.RESTING_HEART_RATE to 365,
         TrackedHealthType.STEPS to 90,
+        TrackedHealthType.STEPS_CADENCE to 90,
         TrackedHealthType.DISTANCE to 90,
+        TrackedHealthType.SPEED to 90,
+        TrackedHealthType.ELEVATION_GAINED to 90,
+        TrackedHealthType.POWER to 90,
+        TrackedHealthType.ACTIVE_CALORIES to 90,
         TrackedHealthType.TOTAL_CALORIES to 90,
         TrackedHealthType.SLEEP to 365,
         TrackedHealthType.EXERCISE to 365,
@@ -235,6 +241,13 @@ class HealthDataRepository(
                 .put("source_record_id", delta.recordId)
                 .put("observed_at_epoch_ms", delta.observedAtEpochMillis)
                 .put("data_origin_package", delta.dataOriginPackage)
+                .put("last_modified_at_epoch_ms", delta.lastModifiedAtEpochMillis)
+                .put("client_record_id", delta.clientRecordId ?: JSONObject.NULL)
+                .put("client_record_version", delta.clientRecordVersion)
+                .put("recording_method", delta.recordingMethod)
+                .put("device_type", delta.deviceType ?: JSONObject.NULL)
+                .put("device_manufacturer", delta.deviceManufacturer ?: JSONObject.NULL)
+                .put("device_model", delta.deviceModel ?: JSONObject.NULL)
                 .put("health_connect_deleted", delta.deleted)
                 .put("data", JSONObject(delta.payloadJson))
             val result = database.pendingChangeDao().insert(
