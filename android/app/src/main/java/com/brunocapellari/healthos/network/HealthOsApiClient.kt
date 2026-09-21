@@ -16,13 +16,25 @@ class HealthOsApiClient(
     private val root = baseUrl.trimEnd('/')
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
-    fun enroll(bootstrapToken: String, identity: DeviceIdentity): JSONObject = post(
+    fun enroll(linkToken: String, identity: DeviceIdentity, role: String = "owner_device"): JSONObject = post(
         path = "/v1/devices/enroll",
         body = JSONObject()
             .put("device_id", identity.deviceId())
             .put("public_key_pem", identity.publicKeyPem())
-            .put("role", "owner_device"),
-        bearer = bootstrapToken,
+            .put("role", role),
+        bearer = linkToken,
+    )
+
+    fun createPairingToken(
+        token: String,
+        role: String = "owner_device",
+        ttlSeconds: Int = 300,
+    ): JSONObject = post(
+        path = "/v1/devices/pairing-token",
+        body = JSONObject()
+            .put("role", role)
+            .put("ttl_seconds", ttlSeconds),
+        bearer = token,
     )
 
     fun authenticate(identity: DeviceIdentity): String {
