@@ -41,4 +41,28 @@ class HealthOsApiClientTest {
         assertEquals("Bearer short-lived-token", request.headers["Authorization"])
         assertTrue(response.has("cursor"))
     }
+
+
+    @Test
+    fun pairingTokenUsesAuthenticatedOwnerEndpoint() {
+        server.enqueue(
+            MockResponse.Builder()
+                .code(200)
+                .body(
+                    "{\"token\":\"pair-token\",\"role\":\"owner_device\"," +
+                        "\"expires_at\":\"2026-09-21T20:00:00Z\"}",
+                )
+                .build(),
+        )
+
+        val response = client.createPairingToken("owner-access-token", ttlSeconds = 300)
+        val request = server.takeRequest()
+
+        assertEquals("/v1/devices/pairing-token", request.url.encodedPath)
+        assertEquals("Bearer owner-access-token", request.headers["Authorization"])
+        val body = org.json.JSONObject(request.body?.utf8() ?: "{}")
+        assertEquals("owner_device", body.getString("role"))
+        assertEquals(300, body.getInt("ttl_seconds"))
+        assertEquals("pair-token", response.getString("token"))
+    }
 }
