@@ -37,10 +37,29 @@ Weight trends, circumferences, photos and composition estimates with source/unce
 Evidence/cost/interaction registry; medication dose changes are forbidden actions.
 
 ### Integrations
-Health Connect, FIT, GPX, CSV, scale/wearable adapters and provenance.
+Health Connect is the primary Android interchange layer. Stable production coverage includes exercise, steps/cadence, distance, total/active calories, sleep, heart rate/resting heart rate, weight, speed, elevation and power. FIT, GPX, CSV and direct scale/wearable adapters are gap-fillers rather than competing canonical pipelines.
 
 ### Knowledge & AI
 Research requests, evidence packages, role-based synthesis and independent audit.
+
+### Future medical-record interoperability
+FHIR compatibility is a disabled-by-default boundary supporting R4/R4B envelopes and provenance. It does not introduce EHR/hospital infrastructure, clinical terminology services or diagnostic logic unless a later validated product requirement justifies them.
+
+## Health observation pipeline
+
+The canonical observation path is:
+
+`Health Connect → source identification → normalization → quality/confidence → duplicate resolution → timeline → missing-data detection → baseline → analytics`
+
+Rules:
+
+- source identity combines Health Connect DataOrigin with device metadata when available;
+- source priority is explicit persisted configuration, never a hard-coded vendor ranking;
+- duplicate resolution only suppresses derived-view duplicates and requires compatible metric/time/value;
+- raw records and tombstones remain immutable evidence;
+- missing-data warnings are emitted only for explicitly configured expected metrics;
+- baseline/analytics datasets pass lightweight internal contracts before they may influence planning;
+- Health Connect Aggregate API may provide source-filtered derived workout totals, while raw records remain the provenance layer.
 
 ## Data model strategy
 
