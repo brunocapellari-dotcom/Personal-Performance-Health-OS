@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -14,6 +15,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -33,6 +35,31 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.LocalDate
+
+data class InitialSetupInput(
+    val goalDescription: String,
+    val goalMetric: String,
+    val goalPriority: Int,
+    val goalBaseline: Double?,
+    val goalTarget: Double?,
+    val goalTargetDate: LocalDate?,
+    val environment: String,
+    val equipment: List<String>,
+    val spaceM2: Double,
+    val fixationPoints: List<String>,
+    val noiseLimit: String,
+    val surface: String,
+    val availableMinutes: Int,
+    val loadOptionsKg: List<Double>,
+    val sleepHours: Double,
+    val sleepQuality: Int,
+    val energy: Int,
+    val fatigue: Int,
+    val soreness: Int,
+    val stress: Int,
+    val painFlag: Boolean,
+)
 
 data class HealthPermissionStatus(
     val coreComplete: Boolean,
@@ -109,6 +136,7 @@ class MainActivity : ComponentActivity() {
                             onGeneratePairingToken = ::generatePairingToken,
                             onEnroll = ::enroll,
                             onSync = ::syncNow,
+                            onSaveInitialSetup = ::saveInitialSetup,
                             activeSessionId = activeSessionId.value,
                             plannedExercises = activeExercises.value,
                             onNextBlock = ::nextBlock,
@@ -178,6 +206,44 @@ class MainActivity : ComponentActivity() {
                 statusText.value = "Dispositivo vinculado"
             }.onFailure {
                 statusText.value = "Falha ao vincular dispositivo: ${it.message ?: "erro desconhecido"}"
+            }
+        }
+    }
+
+    private fun saveInitialSetup(input: InitialSetupInput) {
+        lifecycleScope.launch {
+            statusText.value = "Salvando configuração inicial"
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    container.repository.saveInitialSetup(
+                        goalDescription = input.goalDescription,
+                        goalMetric = input.goalMetric,
+                        goalPriority = input.goalPriority,
+                        goalBaseline = input.goalBaseline,
+                        goalTarget = input.goalTarget,
+                        goalTargetDate = input.goalTargetDate,
+                        environment = input.environment,
+                        equipment = input.equipment,
+                        spaceM2 = input.spaceM2,
+                        fixationPoints = input.fixationPoints,
+                        noiseLimit = input.noiseLimit,
+                        surface = input.surface,
+                        availableMinutes = input.availableMinutes,
+                        loadOptionsKg = input.loadOptionsKg,
+                        sleepHours = input.sleepHours,
+                        sleepQuality = input.sleepQuality,
+                        energy = input.energy,
+                        fatigue = input.fatigue,
+                        soreness = input.soreness,
+                        stress = input.stress,
+                        painFlag = input.painFlag,
+                    )
+                    container.repository.fullSync()
+                }
+            }.onSuccess {
+                statusText.value = "Configuração inicial salva e sincronizada"
+            }.onFailure {
+                statusText.value = "Falha na configuração inicial: ${it.message ?: "erro desconhecido"}"
             }
         }
     }
@@ -287,6 +353,7 @@ private fun Dashboard(
     onGeneratePairingToken: () -> Unit,
     onEnroll: (String) -> Unit,
     onSync: () -> Unit,
+    onSaveInitialSetup: (InitialSetupInput) -> Unit,
     onNextBlock: () -> Unit,
     onRecordSession: (String, Boolean, Int, Double?, String, JSONArray) -> Unit,
 ) {
@@ -355,6 +422,7 @@ private fun Dashboard(
         Button(onClick = onSync, modifier = Modifier.fillMaxWidth()) {
             Text("Sincronizar agora")
         }
+        InitialSetupSection(onSave = onSaveInitialSetup)
         Button(onClick = onNextBlock, modifier = Modifier.fillMaxWidth()) {
             Text("Monta meu próximo bloco")
         }
