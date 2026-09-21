@@ -60,6 +60,7 @@ class MainActivity : ComponentActivity() {
     private val healthText = mutableStateOf("Health Connect não verificado")
     private val activeSessionId = mutableStateOf("")
     private val activeExercises = mutableStateOf<List<PlannedExerciseUi>>(emptyList())
+    private val pairingTokenText = mutableStateOf("")
 
     private val permissionsLauncher = registerForActivityResult(
         PermissionController.createRequestPermissionResultContract(),
@@ -104,6 +105,8 @@ class MainActivity : ComponentActivity() {
                             onExtendedPermissions = {
                                 permissionsLauncher.launch(container.healthConnect.extendedReadPermissions())
                             },
+                            pairingToken = pairingTokenText.value,
+                            onGeneratePairingToken = ::generatePairingToken,
                             onEnroll = ::enroll,
                             onSync = ::syncNow,
                             activeSessionId = activeSessionId.value,
@@ -142,6 +145,22 @@ class MainActivity : ComponentActivity() {
                         "segundo plano: ${if (status.background) "sim" else "não"}"
                 else ->
                     "Health Connect parcialmente autorizado: ${status.readableCount}/${status.totalCount} métricas"
+            }
+        }
+    }
+
+    private fun generatePairingToken() {
+        lifecycleScope.launch {
+            statusText.value = "Gerando token temporário para outro aparelho"
+            runCatching {
+                withContext(Dispatchers.IO) { container.repository.createOwnerPairingToken() }
+            }.onSuccess { response ->
+                pairingTokenText.value =
+                    response.getString("token") + "\nValidade: " + response.getString("expires_at")
+                statusText.value = "Token temporário gerado; use apenas no aparelho que será vinculado"
+            }.onFailure {
+                pairingTokenText.value = ""
+                statusText.value = "Falha ao gerar token: ${it.message ?: "erro desconhecido"}"
             }
         }
     }
@@ -259,11 +278,13 @@ private fun Dashboard(
     operationStatus: String,
     activeSessionId: String,
     plannedExercises: List<PlannedExerciseUi>,
+    pairingToken: String,
     onCorePermissions: () -> Unit,
     onPerformancePermissions: () -> Unit,
     onBodyPermissions: () -> Unit,
     onNutritionPermissions: () -> Unit,
     onExtendedPermissions: () -> Unit,
+    onGeneratePairingToken: () -> Unit,
     onEnroll: (String) -> Unit,
     onSync: () -> Unit,
     onNextBlock: () -> Unit,
@@ -307,6 +328,12 @@ private fun Dashboard(
         }
         Button(onClick = onExtendedPermissions, modifier = Modifier.fillMaxWidth()) {
             Text("Autorizar histórico ampliado e segundo plano (opcional)")
+        }
+        Button(onClick = onGeneratePairingToken, modifier = Modifier.fillMaxWidth()) {
+            Text("Gerar token temporário para outro aparelho")
+        }
+        if (pairingToken.isNotBlank()) {
+            Text(pairingToken, style = MaterialTheme.typography.bodyMedium)
         }
         OutlinedTextField(
             value = bootstrapToken,
