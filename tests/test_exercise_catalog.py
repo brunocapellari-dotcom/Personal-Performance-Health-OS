@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -83,12 +84,7 @@ def test_license_mismatch_fails_closed() -> None:
     candidate = _candidate()
     invalid = ExerciseCandidate(
         exercise=candidate.exercise,
-        provenance=ExerciseProvenance(
-            **{
-                **candidate.provenance.__dict__,
-                "license_id": "unexpected-license",
-            }
-        ),
+        provenance=replace(candidate.provenance, license_id="unexpected-license"),
     )
     findings = ExerciseCatalogGate().validate_candidate(invalid)
     assert "LICENSE_MISMATCH" in {item.code for item in findings}
