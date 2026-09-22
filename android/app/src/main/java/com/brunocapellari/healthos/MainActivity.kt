@@ -61,6 +61,7 @@ class MainActivity : ComponentActivity() {
     private val activeSessionId = mutableStateOf("")
     private val activeExercises = mutableStateOf<List<PlannedExerciseUi>>(emptyList())
     private val pairingTokenText = mutableStateOf("")
+    private val nutritionText = mutableStateOf("")
 
     private val permissionsLauncher = registerForActivityResult(
         PermissionController.createRequestPermissionResultContract(),
@@ -110,6 +111,9 @@ class MainActivity : ComponentActivity() {
                             onEnroll = ::enroll,
                             onSync = ::syncNow,
                             onSaveInitialSetup = ::saveInitialSetup,
+                            nutritionResult = nutritionText.value,
+                            onLookupBarcode = ::lookupFoodBarcode,
+                            onSearchFoods = ::searchFoods,
                             activeSessionId = activeSessionId.value,
                             plannedExercises = activeExercises.value,
                             onNextBlock = ::nextBlock,
@@ -221,6 +225,63 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun lookupFoodBarcode(barcode: String) {
+        lifecycleScope.launch {
+            nutritionText.value = "Buscando produto..."
+            runCatching {
+                withContext(Dispatchers.IO) { container.repository.lookupFoodBarcode(barcode) }
+            }.onSuccess { food ->
+                nutritionText.value = formatFood(food)
+            }.onFailure {
+                nutritionText.value = "Produto não encontrado ou fonte indisponível: ${it.message ?: "erro desconhecido"}"
+            }
+        }
+    }
+
+    private fun searchFoods(query: String) {
+        lifecycleScope.launch {
+            nutritionText.value = "Buscando alimentos..."
+            runCatching {
+                withContext(Dispatchers.IO) { container.repository.searchFoods(query) }
+            }.onSuccess { response ->
+                val foods = response.optJSONArray("foods") ?: JSONArray()
+                nutritionText.value = if (foods.length() == 0) {
+                    "Nenhum alimento encontrado."
+                } else {
+                    buildString {
+                        val limit = minOf(foods.length(), 8)
+                        for (index in 0 until limit) {
+                            if (index > 0) append("\n\n")
+                            append(formatFood(foods.getJSONObject(index)))
+                        }
+                    }
+                }
+            }.onFailure {
+                nutritionText.value = "Busca de alimentos indisponível: ${it.message ?: "erro desconhecido"}"
+            }
+        }
+    }
+
+    private fun formatFood(food: JSONObject): String {
+        fun nutrient(label: String, key: String, unit: String): String? =
+            if (food.isNull(key) || !food.has(key)) null else "$label: ${food.optDouble(key)} $unit/100 g"
+
+        return buildString {
+            append(food.optString("name", "Alimento"))
+            append("\nFonte: ")
+            append(food.optString("source", "desconhecida"))
+            listOfNotNull(
+                nutrient("Energia", "energy_kcal_per_100g", "kcal"),
+                nutrient("Proteína", "protein_g_per_100g", "g"),
+                nutrient("Carboidrato", "carbohydrate_g_per_100g", "g"),
+                nutrient("Gordura", "fat_g_per_100g", "g"),
+            ).forEach {
+                append("\n")
+                append(it)
+            }
+        }
+    }
+
     private fun syncNow() {
         lifecycleScope.launch {
             statusText.value = "Sincronizando"
@@ -327,6 +388,9 @@ private fun Dashboard(
     onEnroll: (String) -> Unit,
     onSync: () -> Unit,
     onSaveInitialSetup: (InitialSetupInput) -> Unit,
+    nutritionResult: String,
+    onLookupBarcode: (String) -> Unit,
+    onSearchFoods: (String) -> Unit,
     onNextBlock: () -> Unit,
     onRecordSession: (String, Boolean, Int, Double?, String, JSONArray) -> Unit,
 ) {
@@ -396,6 +460,11 @@ private fun Dashboard(
             Text("Sincronizar agora")
         }
         InitialSetupSection(onSave = onSaveInitialSetup)
+        NutritionBarcodeSection(
+            resultText = nutritionResult,
+            onLookupBarcode = onLookupBarcode,
+            onSearchFoods = onSearchFoods,
+        )
         Button(onClick = onNextBlock, modifier = Modifier.fillMaxWidth()) {
             Text("Monta meu próximo bloco")
         }
