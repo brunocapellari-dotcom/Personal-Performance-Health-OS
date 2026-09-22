@@ -165,11 +165,11 @@ fun InitialSetupSection(
                 goalBaseline = goalBaseline,
                 goalTarget = goalTarget,
                 goalTargetDate = goalTargetDate,
-                environment = environment,
+                environment = environment.trim(),
                 equipment = equipment,
                 spaceM2 = spaceM2,
                 fixationPoints = fixationPoints,
-                noiseLimit = noiseLimit,
+                noiseLimit = noiseLimit.trim(),
                 surface = surface,
                 availableMinutes = availableMinutes,
                 loadOptions = loadOptions,
@@ -318,7 +318,7 @@ private fun ChoiceRows(
     }
 }
 
-private fun String.onlyDigits(): String = filter(Char::isDigit)
+private fun String.onlyDigits(): String = filter { char -> char.isDigit() }
 
 private fun String.decimalInput(): String =
     filter { char -> char.isDigit() || char == '.' || char == ',' || char == '-' }
@@ -335,7 +335,7 @@ private fun parseDecimalCsv(value: String): List<Double>? {
     val parts = value.split(',').map(String::trim).filter(String::isNotBlank)
     val parsed = parts.map { it.decimalOrNull() }
     if (parsed.any { it == null }) return null
-    val values = parsed.map(::requireNotNull)
+    val values = parsed.map { requireNotNull(it) }
     if (values.any { it <= 0.0 || it > 5000.0 } || values.distinct().size != values.size) return null
     return values.sorted()
 }
