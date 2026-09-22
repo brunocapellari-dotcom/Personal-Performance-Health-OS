@@ -158,7 +158,7 @@ fun InitialSetupSection(
 
     Button(
         onClick = {
-            val parsed = parseInitialSetup(
+            val parsed = parseInitialSetupInput(
                 goalDescription = goalDescription,
                 goalMetric = goalMetric,
                 goalPriority = goalPriority,
@@ -198,7 +198,7 @@ fun InitialSetupSection(
 }
 
 @Suppress("LongParameterList")
-private fun parseInitialSetup(
+internal fun parseInitialSetupInput(
     goalDescription: String,
     goalMetric: String,
     goalPriority: String,
