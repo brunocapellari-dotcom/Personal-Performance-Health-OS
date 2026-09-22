@@ -414,3 +414,20 @@ def test_observation_timeline_and_source_inventory_are_provenance_aware() -> Non
     source_ids = {item["source_id"] for item in sources.json()["sources"]}
     assert any(value.startswith("health_connect:com.synthetic.scale") for value in source_ids)
     assert any(value.startswith("health_connect:com.synthetic.watch") for value in source_ids)
+
+
+def test_api_responses_are_non_cacheable_and_request_id_is_bounded() -> None:
+    client = _client()
+    response = client.get("/healthz", headers={"X-Request-ID": "healthos-test-1234"})
+
+    assert response.status_code == 200
+    assert response.headers["x-request-id"] == "healthos-test-1234"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["pragma"] == "no-cache"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["referrer-policy"] == "no-referrer"
+
+    invalid = client.get("/healthz", headers={"X-Request-ID": "bad id with spaces"})
+    generated = invalid.headers["x-request-id"]
+    assert generated != "bad id with spaces"
+    assert len(generated) == 32
