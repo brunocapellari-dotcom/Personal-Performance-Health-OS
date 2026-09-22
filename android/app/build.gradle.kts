@@ -70,6 +70,9 @@ dependencies {
     androidTestImplementation(composeBom)
 
     implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("androidx.camera:camera-camera2:1.6.2")
+    implementation("androidx.camera:camera-lifecycle:1.6.2")
+    implementation("androidx.camera:camera-view:1.6.2")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.runtime:runtime")
     implementation("androidx.compose.ui:ui")
@@ -84,6 +87,7 @@ dependencies {
     implementation(platform("com.squareup.okhttp3:okhttp-bom:5.5.0"))
     implementation("com.squareup.okhttp3:okhttp")
     implementation("net.zetetic:sqlcipher-android:4.19.0@aar")
+    implementation("io.github.zxing-cpp:android:3.1.1")
 
     ksp("androidx.room3:room3-compiler:3.0.3")
 
