@@ -2,6 +2,7 @@ package com.brunocapellari.healthos.network
 
 import com.brunocapellari.healthos.security.DeviceIdentity
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -67,6 +68,26 @@ class HealthOsApiClient(
         body = request,
         bearer = token,
     )
+
+    fun lookupFoodBarcode(token: String, barcode: String): JSONObject {
+        require(barcode.matches(Regex("^\\d{4,24}$"))) { "barcode must contain 4 to 24 digits" }
+        return get(path = "/v1/nutrition/barcode/$barcode", bearer = token)
+    }
+
+    fun searchFoods(token: String, query: String): JSONObject {
+        val normalized = query.trim().replace(Regex("\\s+"), " ")
+        require(normalized.length in 1..200) { "nutrition query must contain 1 to 200 characters" }
+        val url = (root + "/v1/nutrition/search").toHttpUrl().newBuilder()
+            .addQueryParameter("q", normalized)
+            .build()
+        return execute(
+            Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer $token")
+                .get()
+                .build(),
+        )
+    }
 
     private fun post(path: String, body: JSONObject, bearer: String? = null): JSONObject {
         val builder = Request.Builder()
