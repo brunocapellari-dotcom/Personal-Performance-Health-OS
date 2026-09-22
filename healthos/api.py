@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, datetime
+import logging
+import re
+import time
 from dataclasses import asdict
 from typing import Annotated
 from uuid import uuid4
 
 import httpx
 import uvicorn
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -66,6 +69,10 @@ from .state import PlanningStateResolver
 from .sync import IncomingChange, current_cursor, pull_changes, push_changes
 
 
+LOGGER = logging.getLogger("healthos.api")
+REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{8,128}$")
+
+
 def create_app(
     settings: Settings | None = None,
     *,
@@ -95,6 +102,34 @@ def create_app(
     )
     app.state.settings = resolved_settings
     app.state.database = resolved_database
+
+    @app.middleware("http")
+    async def request_context(request: Request, call_next):
+        supplied_request_id = request.headers.get("X-Request-ID", "")
+        request_id = (
+            supplied_request_id
+            if REQUEST_ID_PATTERN.fullmatch(supplied_request_id)
+            else uuid4().hex
+        )
+        started = time.perf_counter()
+        response = await call_next(request)
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+        route = request.scope.get("route")
+        route_template = getattr(route, "path", "unmatched")
+        LOGGER.info(
+            "request_completed method=%s route=%s status=%s duration_ms=%s request_id=%s",
+            request.method,
+            route_template,
+            response.status_code,
+            elapsed_ms,
+            request_id,
+        )
+        response.headers["X-Request-ID"] = request_id
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
 
     def get_session() -> Iterator[Session]:
         with resolved_database.session() as db:
