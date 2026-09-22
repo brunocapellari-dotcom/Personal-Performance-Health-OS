@@ -96,6 +96,19 @@ class HealthDataRepository(
         return api.createPairingToken(token, role = "owner_device", ttlSeconds = ttlSeconds)
     }
 
+    suspend fun lookupFoodBarcode(barcode: String): JSONObject {
+        require(barcode.matches(Regex("^\\d{4,24}$"))) { "barcode must contain 4 to 24 digits" }
+        val token = api.authenticate(identity)
+        return api.lookupFoodBarcode(token, barcode)
+    }
+
+    suspend fun searchFoods(query: String): JSONObject {
+        val normalized = query.trim().replace(Regex("\\s+"), " ")
+        require(normalized.length in 1..200) { "nutrition query must contain 1 to 200 characters" }
+        val token = api.authenticate(identity)
+        return api.searchFoods(token, normalized)
+    }
+
     suspend fun fullSync(mode: HealthIngestionMode = HealthIngestionMode.FOREGROUND): SyncSummary {
         val hasAnyRead = healthConnect.hasAnyReadPermission()
         val backgroundAllowed = mode != HealthIngestionMode.BACKGROUND || healthConnect.hasBackgroundReadPermission()
