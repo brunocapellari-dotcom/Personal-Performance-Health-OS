@@ -46,11 +46,31 @@ private val RETAIL_BARCODE_FORMATS = setOf(
 fun NutritionBarcodeSection(
     resultText: String,
     onLookupBarcode: (String) -> Unit,
+    onSearchFoods: (String) -> Unit,
 ) {
     var manualBarcode by remember { mutableStateOf("") }
+    var foodQuery by remember { mutableStateOf("") }
     var scannerOpen by remember { mutableStateOf(false) }
 
-    Text("Alimento por código de barras", style = MaterialTheme.typography.titleMedium)
+    Text("Nutrição", style = MaterialTheme.typography.titleMedium)
+    OutlinedTextField(
+        value = foodQuery,
+        onValueChange = { foodQuery = it.take(200) },
+        label = { Text("Buscar alimento") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Button(
+        onClick = {
+            val query = foodQuery.trim()
+            if (query.isNotEmpty()) onSearchFoods(query)
+        },
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text("Buscar alimento")
+    }
+
+    Text("Produto por código de barras", style = MaterialTheme.typography.titleSmall)
     OutlinedTextField(
         value = manualBarcode,
         onValueChange = { value -> manualBarcode = value.filter { it.isDigit() }.take(24) },
@@ -148,7 +168,7 @@ private fun RetailBarcodeScanner(
                 image.use {
                     reader.read(it)
                         .asSequence()
-                        .mapNotNull { result -> result.text?.filter(Char::isDigit) }
+                        .mapNotNull { result -> result.text?.filter { char -> char.isDigit() } }
                         .firstOrNull { value -> value.length in 4..24 }
                 }
             }.getOrNull()
