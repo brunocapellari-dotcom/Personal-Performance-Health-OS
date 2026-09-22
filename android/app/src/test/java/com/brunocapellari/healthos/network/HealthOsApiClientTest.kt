@@ -65,4 +65,44 @@ class HealthOsApiClientTest {
         assertEquals(300, body.getInt("ttl_seconds"))
         assertEquals("pair-token", response.getString("token"))
     }
+
+
+    @Test
+    fun barcodeLookupUsesAuthenticatedCanonicalNutritionEndpoint() {
+        server.enqueue(
+            MockResponse.Builder()
+                .code(200)
+                .body("{\"name\":\"Synthetic Food\",\"source\":\"open_food_facts\"}")
+                .build(),
+        )
+
+        val response = client.lookupFoodBarcode("nutrition-token", "7891234567890")
+        val request = server.takeRequest()
+
+        assertEquals("/v1/nutrition/barcode/7891234567890", request.url.encodedPath)
+        assertEquals("Bearer nutrition-token", request.headers["Authorization"])
+        assertEquals("Synthetic Food", response.getString("name"))
+    }
+
+    @Test
+    fun foodSearchEncodesQueryAndUsesBearer() {
+        server.enqueue(
+            MockResponse.Builder()
+                .code(200)
+                .body("{\"foods\":[]}")
+                .build(),
+        )
+
+        client.searchFoods("nutrition-token", "arroz integral")
+        val request = server.takeRequest()
+
+        assertEquals("/v1/nutrition/search", request.url.encodedPath)
+        assertEquals("arroz integral", request.url.queryParameter("q"))
+        assertEquals("Bearer nutrition-token", request.headers["Authorization"])
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun barcodeLookupRejectsNonNumericCodeBeforeNetwork() {
+        client.lookupFoodBarcode("nutrition-token", "ABC-123")
+    }
 }
