@@ -17,9 +17,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -32,7 +30,6 @@ import androidx.lifecycle.lifecycleScope
 import com.brunocapellari.healthos.data.WorkoutDraft
 import com.brunocapellari.healthos.data.WorkoutDraftExercise
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -57,12 +54,6 @@ data class PlannedExerciseUi(
     val groupType: String? = null,
     val groupId: String? = null,
     val alternatives: List<String> = emptyList(),
-)
-
-data class ExerciseLogValues(
-    val loadKg: String = "",
-    val repsCsv: String = "",
-    val rirCsv: String = "",
 )
 
 class MainActivity : ComponentActivity() {
@@ -331,7 +322,7 @@ class MainActivity : ComponentActivity() {
                     activeSessionId.value = draft.sessionId
                     activeExercises.value = draft.exercises.map { exercise ->
                         PlannedExerciseUi(
-                            exerciseId = exercise.exerciseId,
+                            exerciseId = exercise.plannedExerciseId,
                             plannedSets = exercise.plannedSets,
                             suggestedLoadKg = exercise.suggestedLoadKg,
                             targetRir = exercise.targetRir,
@@ -548,110 +539,6 @@ private fun Dashboard(
     onRecordSession: (String, Boolean, Int, Double?, String, JSONArray) -> Unit,
 ) {
     var bootstrapToken by remember { mutableStateOf("") }
-    val matchingDraft = initialDraft?.takeIf { it.sessionId == activeSessionId }
-    var sessionId by remember(activeSessionId, matchingDraft?.updatedAtEpochMillis) {
-        mutableStateOf(matchingDraft?.sessionId ?: activeSessionId)
-    }
-    var completed by remember(activeSessionId, matchingDraft?.updatedAtEpochMillis) {
-        mutableStateOf(matchingDraft?.completed ?: true)
-    }
-    var duration by remember(activeSessionId, matchingDraft?.updatedAtEpochMillis) {
-        mutableStateOf(matchingDraft?.duration ?: "")
-    }
-    var rpe by remember(activeSessionId, matchingDraft?.updatedAtEpochMillis) {
-        mutableStateOf(matchingDraft?.rpe ?: "")
-    }
-    var notes by remember(activeSessionId, matchingDraft?.updatedAtEpochMillis) {
-        mutableStateOf(matchingDraft?.notes ?: "")
-    }
-    var restSecondsRemaining by remember(activeSessionId) { mutableStateOf(0) }
-    LaunchedEffect(restSecondsRemaining) {
-        if (restSecondsRemaining > 0) {
-            delay(1000)
-            restSecondsRemaining -= 1
-        }
-    }
-    val selectedExerciseIds = remember(activeSessionId, plannedExercises, matchingDraft?.updatedAtEpochMillis) {
-        mutableStateMapOf<String, String>().apply {
-            plannedExercises.forEach { exercise ->
-                val saved = matchingDraft?.exercises?.firstOrNull {
-                    it.plannedExerciseId == exercise.exerciseId
-                }
-                put(exercise.exerciseId, saved?.exerciseId ?: exercise.exerciseId)
-            }
-        }
-    }
-    val substitutionReasons = remember(activeSessionId, plannedExercises, matchingDraft?.updatedAtEpochMillis) {
-        mutableStateMapOf<String, String>().apply {
-            plannedExercises.forEach { exercise ->
-                val saved = matchingDraft?.exercises?.firstOrNull {
-                    it.plannedExerciseId == exercise.exerciseId
-                }
-                saved?.substitutionReason?.let { put(exercise.exerciseId, it) }
-            }
-        }
-    }
-    val exerciseLogs = remember(activeSessionId, plannedExercises, matchingDraft?.updatedAtEpochMillis) {
-        mutableStateMapOf<String, ExerciseLogValues>().apply {
-            plannedExercises.forEach { exercise ->
-                val saved = matchingDraft?.exercises?.firstOrNull {
-                    it.plannedExerciseId == exercise.exerciseId
-                }
-                put(
-                    exercise.exerciseId,
-                    ExerciseLogValues(
-                        loadKg = saved?.loadKg ?: exercise.suggestedLoadKg?.toString().orEmpty(),
-                        repsCsv = saved?.repsCsv.orEmpty(),
-                        rirCsv = saved?.rirCsv.orEmpty(),
-                    ),
-                )
-            }
-        }
-    }
-    val exerciseSnapshot = exerciseLogs.toMap()
-    val selectedExerciseSnapshot = selectedExerciseIds.toMap()
-    val substitutionReasonSnapshot = substitutionReasons.toMap()
-    LaunchedEffect(
-        sessionId,
-        completed,
-        duration,
-        rpe,
-        notes,
-        exerciseSnapshot,
-        selectedExerciseSnapshot,
-        substitutionReasonSnapshot,
-    ) {
-        if (sessionId.isBlank()) return@LaunchedEffect
-        delay(600)
-        onSaveWorkoutDraft(
-            WorkoutDraft(
-                sessionId = sessionId,
-                completed = completed,
-                duration = duration,
-                rpe = rpe,
-                notes = notes,
-                exercises = plannedExercises.map { exercise ->
-                    val values = exerciseSnapshot[exercise.exerciseId] ?: ExerciseLogValues()
-                    WorkoutDraftExercise(
-                        plannedExerciseId = exercise.exerciseId,
-                        exerciseId = selectedExerciseSnapshot[exercise.exerciseId] ?: exercise.exerciseId,
-                        plannedSets = exercise.plannedSets,
-                        suggestedLoadKg = exercise.suggestedLoadKg,
-                        targetRir = exercise.targetRir,
-                        restSeconds = exercise.restSeconds,
-                        setType = exercise.setType,
-                        groupType = exercise.groupType,
-                        groupId = exercise.groupId,
-                        alternatives = exercise.alternatives,
-                        substitutionReason = substitutionReasonSnapshot[exercise.exerciseId],
-                        loadKg = values.loadKg,
-                        repsCsv = values.repsCsv,
-                        rirCsv = values.rirCsv,
-                    )
-                },
-            ),
-        )
-    }
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -662,6 +549,7 @@ private fun Dashboard(
         Button(onClick = onRefreshDashboard, modifier = Modifier.fillMaxWidth()) {
             Text("Atualizar resumo")
         }
+
         Text(healthStatus)
         Button(onClick = onCorePermissions, modifier = Modifier.fillMaxWidth()) {
             Text("Autorizar métricas básicas do Health Connect")
@@ -678,6 +566,7 @@ private fun Dashboard(
         Button(onClick = onExtendedPermissions, modifier = Modifier.fillMaxWidth()) {
             Text("Autorizar histórico ampliado e segundo plano (opcional)")
         }
+
         Button(onClick = onGeneratePairingToken, modifier = Modifier.fillMaxWidth()) {
             Text("Gerar token temporário para outro aparelho")
         }
@@ -701,9 +590,11 @@ private fun Dashboard(
         ) {
             Text("Vincular este aparelho")
         }
+
         Button(onClick = onSync, modifier = Modifier.fillMaxWidth()) {
             Text("Sincronizar agora")
         }
+
         InitialSetupSection(onSave = onSaveInitialSetup)
         NutritionBarcodeSection(
             resultText = nutritionResult,
@@ -714,179 +605,13 @@ private fun Dashboard(
             Text("Monta meu próximo bloco")
         }
 
-        Text("Registrar treino realizado", style = MaterialTheme.typography.titleMedium)
-        OutlinedTextField(
-            value = sessionId,
-            onValueChange = { sessionId = it },
-            label = { Text("ID da sessão planejada") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+        WorkoutSessionSection(
+            activeSessionId = activeSessionId,
+            plannedExercises = plannedExercises,
+            initialDraft = initialDraft,
+            onSaveWorkoutDraft = onSaveWorkoutDraft,
+            onRecordSession = onRecordSession,
         )
-        Column {
-            Text("Sessão concluída")
-            Checkbox(checked = completed, onCheckedChange = { completed = it })
-        }
-        OutlinedTextField(
-            value = duration,
-            onValueChange = { duration = it.filter { char -> char.isDigit() } },
-            label = { Text("Duração em minutos") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = rpe,
-            onValueChange = { value ->
-                rpe = value.filter { char -> char.isDigit() || char == '.' || char == ',' }
-            },
-            label = { Text("RPE da sessão (0–10, opcional)") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        plannedExercises.forEach { exercise ->
-            val values = exerciseLogs[exercise.exerciseId] ?: ExerciseLogValues()
-            val selectedExerciseId = selectedExerciseIds[exercise.exerciseId] ?: exercise.exerciseId
-            val groupLabel = when (exercise.groupType) {
-                "superset" -> "superset ${exercise.groupId.orEmpty()}"
-                "circuit" -> "circuito ${exercise.groupId.orEmpty()}"
-                else -> ""
-            }
-            Text(
-                buildString {
-                    append("$selectedExerciseId — ${exercise.plannedSets} séries; RIR alvo ${exercise.targetRir}")
-                    if (selectedExerciseId != exercise.exerciseId) {
-                        append("; planejado ${exercise.exerciseId}")
-                    }
-                    append("; tipo ${exercise.setType}")
-                    if (groupLabel.isNotBlank()) append("; $groupLabel")
-                },
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            if (exercise.alternatives.isNotEmpty()) {
-                Button(
-                    onClick = {
-                        val candidates = listOf(exercise.exerciseId) + exercise.alternatives
-                        val currentIndex = candidates.indexOf(selectedExerciseId).coerceAtLeast(0)
-                        val next = candidates[(currentIndex + 1) % candidates.size]
-                        selectedExerciseIds[exercise.exerciseId] = next
-                        if (next == exercise.exerciseId) {
-                            substitutionReasons.remove(exercise.exerciseId)
-                        } else {
-                            substitutionReasons[exercise.exerciseId] = "user_selected_environment_safe_alternative"
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Substituir exercício")
-                }
-            }
-            if (exercise.restSeconds != null && exercise.restSeconds > 0) {
-                Button(
-                    onClick = { restSecondsRemaining = exercise.restSeconds ?: 0 },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        if (restSecondsRemaining > 0) {
-                            "Descanso: ${restSecondsRemaining}s"
-                        } else {
-                            "Iniciar descanso de ${exercise.restSeconds}s"
-                        },
-                    )
-                }
-            }
-            OutlinedTextField(
-                value = values.loadKg,
-                onValueChange = { value ->
-                    exerciseLogs[exercise.exerciseId] = values.copy(
-                        loadKg = value.filter { char -> char.isDigit() || char == '.' || char == ',' },
-                    )
-                },
-                label = { Text("Carga kg (vazio para peso corporal)") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedTextField(
-                value = values.repsCsv,
-                onValueChange = { value ->
-                    exerciseLogs[exercise.exerciseId] = values.copy(
-                        repsCsv = value.filter { char -> char.isDigit() || char == ',' || char == ' ' },
-                    )
-                },
-                label = { Text("Repetições por série, ex.: 12,12,10") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedTextField(
-                value = values.rirCsv,
-                onValueChange = { value ->
-                    exerciseLogs[exercise.exerciseId] = values.copy(
-                        rirCsv = value.filter { char ->
-                            char.isDigit() || char == ',' || char == '.' || char == ' '
-                        },
-                    )
-                },
-                label = { Text("RIR por série, ex.: 3,2,2") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-
-        OutlinedTextField(
-            value = notes,
-            onValueChange = { if (it.length <= 5000) notes = it },
-            label = { Text("Observações") },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Button(
-            onClick = {
-                val parsedDuration = duration.toIntOrNull()
-                val parsedRpe = rpe.replace(',', '.').toDoubleOrNull()
-                if (
-                    sessionId.isNotBlank() &&
-                    parsedDuration != null &&
-                    (parsedRpe == null || parsedRpe in 0.0..10.0)
-                ) {
-                    val exercisePayload = JSONArray()
-                    plannedExercises.forEach { exercise ->
-                        val values = exerciseLogs[exercise.exerciseId] ?: ExerciseLogValues()
-                        val reps = values.repsCsv.split(',')
-                            .mapNotNull { item -> item.trim().toIntOrNull() }
-                        val rirs = values.rirCsv.split(',')
-                            .mapNotNull { item -> item.trim().replace(',', '.').toDoubleOrNull() }
-                        val load = values.loadKg.replace(',', '.').toDoubleOrNull()
-                        val sets = JSONArray()
-                        reps.forEachIndexed { index, repetitions ->
-                            sets.put(
-                                JSONObject()
-                                    .put("set_number", index + 1)
-                                    .put("reps", repetitions)
-                                    .put("load_kg", load ?: JSONObject.NULL)
-                                    .put("rir", rirs.getOrNull(index) ?: JSONObject.NULL)
-                                    .put("set_type", exercise.setType),
-                            )
-                        }
-                        exercisePayload.put(
-                            JSONObject()
-                                .put("planned_exercise_id", exercise.exerciseId)
-                                .put(
-                                    "exercise_id",
-                                    selectedExerciseIds[exercise.exerciseId] ?: exercise.exerciseId,
-                                )
-                                .put(
-                                    "substitution_reason",
-                                    substitutionReasons[exercise.exerciseId] ?: JSONObject.NULL,
-                                )
-                                .put("sets", sets)
-                                .put("group_type", exercise.groupType ?: JSONObject.NULL)
-                                .put("group_id", exercise.groupId ?: JSONObject.NULL),
-                        )
-                    }
-                    onRecordSession(sessionId, completed, parsedDuration, parsedRpe, notes, exercisePayload)
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Salvar e sincronizar treino")
-        }
         Text(operationStatus, style = MaterialTheme.typography.bodyMedium)
     }
 }
