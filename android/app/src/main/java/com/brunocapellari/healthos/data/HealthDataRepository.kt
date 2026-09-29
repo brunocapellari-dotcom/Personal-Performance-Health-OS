@@ -377,11 +377,26 @@ class HealthDataRepository(
         rpe: Double?,
         notes: String = "",
         exercises: JSONArray = JSONArray(),
+        avgHrBpm: Double? = null,
+        maxHrBpm: Double? = null,
+        distanceM: Double? = null,
+        modality: String? = null,
+        avgPowerW: Double? = null,
+        avgCadenceRpm: Double? = null,
+        intervalStructure: String? = null,
     ): String {
         require(plannedSessionId.isNotBlank()) { "plannedSessionId is required" }
         require(durationMinutes in 0..1440) { "durationMinutes must be between 0 and 1440" }
         require(rpe == null || rpe in 0.0..10.0) { "RPE must be between 0 and 10" }
         require(notes.length <= 5000) { "notes exceed 5000 characters" }
+        require(avgHrBpm == null || avgHrBpm in 20.0..300.0) { "average HR is outside accepted bounds" }
+        require(maxHrBpm == null || maxHrBpm in 20.0..300.0) { "max HR is outside accepted bounds" }
+        require(avgHrBpm == null || maxHrBpm == null || avgHrBpm <= maxHrBpm) { "average HR cannot exceed max HR" }
+        require(distanceM == null || distanceM in 0.0..1_000_000.0) { "distance is outside accepted bounds" }
+        require(avgPowerW == null || avgPowerW in 0.0..5000.0) { "average power is outside accepted bounds" }
+        require(avgCadenceRpm == null || avgCadenceRpm in 0.0..300.0) { "cadence is outside accepted bounds" }
+        require(modality == null || modality.trim().length in 1..64) { "invalid modality" }
+        require(intervalStructure == null || intervalStructure.length <= 1000) { "interval structure is too long" }
 
         val performedId = UUID.randomUUID().toString()
         val now = Instant.now()
@@ -391,6 +406,13 @@ class HealthDataRepository(
             .put("completed", completed)
             .put("duration_minutes", durationMinutes)
             .put("rpe", rpe ?: JSONObject.NULL)
+            .put("avg_hr_bpm", avgHrBpm ?: JSONObject.NULL)
+            .put("max_hr_bpm", maxHrBpm ?: JSONObject.NULL)
+            .put("distance_m", distanceM ?: JSONObject.NULL)
+            .put("modality", modality?.trim() ?: JSONObject.NULL)
+            .put("avg_power_w", avgPowerW ?: JSONObject.NULL)
+            .put("avg_cadence_rpm", avgCadenceRpm ?: JSONObject.NULL)
+            .put("interval_structure", intervalStructure ?: JSONObject.NULL)
             .put("notes", notes)
             .put("exercises", exercises)
 
@@ -401,6 +423,35 @@ class HealthDataRepository(
             logicalClock = now.toEpochMilli().coerceAtLeast(1),
         )
         return performedId
+    }
+
+    suspend fun recordManualCardioSession(
+        modality: String,
+        durationMinutes: Int,
+        rpe: Double?,
+        distanceM: Double?,
+        avgHrBpm: Double?,
+        maxHrBpm: Double?,
+        avgPowerW: Double?,
+        avgCadenceRpm: Double?,
+        intervalStructure: String?,
+        notes: String,
+    ): String {
+        val sessionId = "manual-cardio-${UUID.randomUUID()}"
+        return recordPerformedSession(
+            plannedSessionId = sessionId,
+            completed = true,
+            durationMinutes = durationMinutes,
+            rpe = rpe,
+            notes = notes,
+            avgHrBpm = avgHrBpm,
+            maxHrBpm = maxHrBpm,
+            distanceM = distanceM,
+            modality = modality,
+            avgPowerW = avgPowerW,
+            avgCadenceRpm = avgCadenceRpm,
+            intervalStructure = intervalStructure,
+        )
     }
 
     private suspend fun stageEntity(
