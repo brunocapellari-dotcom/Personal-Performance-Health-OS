@@ -8,6 +8,10 @@ data class WorkoutDraftExercise(
     val plannedSets: Int,
     val suggestedLoadKg: Double?,
     val targetRir: Double,
+    val restSeconds: Int? = null,
+    val setType: String = "working",
+    val groupType: String? = null,
+    val groupId: String? = null,
     val loadKg: String = "",
     val repsCsv: String = "",
     val rirCsv: String = "",
@@ -31,6 +35,10 @@ data class WorkoutDraft(
                     .put("planned_sets", exercise.plannedSets)
                     .put("suggested_load_kg", exercise.suggestedLoadKg ?: JSONObject.NULL)
                     .put("target_rir", exercise.targetRir)
+                    .put("rest_seconds", exercise.restSeconds ?: JSONObject.NULL)
+                    .put("set_type", exercise.setType)
+                    .put("group_type", exercise.groupType ?: JSONObject.NULL)
+                    .put("group_id", exercise.groupId ?: JSONObject.NULL)
                     .put("load_kg", exercise.loadKg)
                     .put("reps_csv", exercise.repsCsv)
                     .put("rir_csv", exercise.rirCsv),
@@ -60,6 +68,10 @@ data class WorkoutDraft(
                             plannedSets = exercise.getInt("planned_sets"),
                             suggestedLoadKg = if (exercise.isNull("suggested_load_kg")) null else exercise.getDouble("suggested_load_kg"),
                             targetRir = exercise.getDouble("target_rir"),
+                            restSeconds = if (exercise.isNull("rest_seconds")) null else exercise.getInt("rest_seconds"),
+                            setType = exercise.optString("set_type", "working"),
+                            groupType = exercise.optString("group_type").takeIf(String::isNotBlank),
+                            groupId = exercise.optString("group_id").takeIf(String::isNotBlank),
                             loadKg = exercise.optString("load_kg", ""),
                             repsCsv = exercise.optString("reps_csv", ""),
                             rirCsv = exercise.optString("rir_csv", ""),
