@@ -37,6 +37,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.LocalDate
 
 data class HealthPermissionStatus(
     val coreComplete: Boolean,
@@ -70,6 +71,7 @@ class MainActivity : ComponentActivity() {
     private val activeExercises = mutableStateOf<List<PlannedExerciseUi>>(emptyList())
     private val pairingTokenText = mutableStateOf("")
     private val nutritionText = mutableStateOf("")
+    private val dashboardText = mutableStateOf("Resumo diário ainda não carregado")
     private val workoutDraft = mutableStateOf<WorkoutDraft?>(null)
 
     private val permissionsLauncher = registerForActivityResult(
@@ -122,6 +124,8 @@ class MainActivity : ComponentActivity() {
                             onSync = ::syncNow,
                             onSaveInitialSetup = ::saveInitialSetup,
                             nutritionResult = nutritionText.value,
+                            dashboardResult = dashboardText.value,
+                            onRefreshDashboard = ::refreshDashboard,
                             onLookupBarcode = ::lookupFoodBarcode,
                             onSearchFoods = ::searchFoods,
                             activeSessionId = activeSessionId.value,
@@ -309,6 +313,7 @@ class MainActivity : ComponentActivity() {
                     "Sync concluído: ${summary.pushed} enviados, ${summary.pulled} recebidos, " +
                     "${summary.conflicts} conflitos$healthNote"
                 refreshHealthStatus()
+                refreshDashboard()
             }.onFailure {
                 statusText.value = "Falha de sync: ${it.message ?: "erro desconhecido"}"
             }
@@ -353,6 +358,60 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun refreshDashboard() {
+        lifecycleScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { container.repository.loadDashboard(LocalDate.now()) }
+            }.onSuccess { response ->
+                dashboardText.value = formatDashboard(response)
+            }.onFailure {
+                dashboardText.value = "Resumo diário indisponível: ${it.message ?: "erro desconhecido"}"
+            }
+        }
+    }
+
+    private fun formatDashboard(response: JSONObject): String {
+        fun display(obj: JSONObject, key: String): String =
+            if (!obj.has(key) || obj.isNull(key)) "—" else obj.get(key).toString()
+
+        val training = response.optJSONObject("training") ?: JSONObject()
+        val recovery = response.optJSONObject("recovery") ?: JSONObject()
+        val activity = response.optJSONObject("activity") ?: JSONObject()
+        val body = response.optJSONObject("body") ?: JSONObject()
+        val alerts = response.optJSONArray("alerts") ?: JSONArray()
+
+        return buildString {
+            append("Treino: ")
+            append(display(training, "focus"))
+            append(" • ")
+            append(display(training, "duration_minutes"))
+            append(" min")
+            append("\nRecuperação: ")
+            append(display(recovery, "readiness_score"))
+            append(" • ")
+            append(display(recovery, "action"))
+            append("\nSemana: ")
+            append(display(activity, "sessions"))
+            append(" sessões • ")
+            append(display(activity, "total_minutes"))
+            append(" min")
+            append("\nPassos hoje: ")
+            append(display(activity, "steps_today"))
+            append("\nPeso: ")
+            append(display(body, "latest_weight_kg"))
+            append(" kg • média móvel ")
+            append(display(body, "weight_rolling_average_kg"))
+            append(" kg")
+            if (alerts.length() > 0) {
+                append("\nAlertas:")
+                for (index in 0 until alerts.length()) {
+                    append("\n• ")
+                    append(alerts.getString(index))
+                }
+            }
+        }
+    }
+
     private fun recordSession(
         plannedSessionId: String,
         completed: Boolean,
@@ -381,6 +440,7 @@ class MainActivity : ComponentActivity() {
                 activeSessionId.value = ""
                 activeExercises.value = emptyList()
                 statusText.value = "Treino realizado registrado e sincronizado"
+                refreshDashboard()
             }.onFailure {
                 statusText.value = "Falha ao registrar treino: ${it.message ?: "erro desconhecido"}"
             }
@@ -438,6 +498,7 @@ class MainActivity : ComponentActivity() {
                     statusText.value =
                         "Novo bloco auditado e aprovado (${response.getString("snapshot_id").take(8)}); " +
                         "${sessions.length()} sessões planejadas"
+                    refreshDashboard()
                 } else {
                     statusText.value = "Bloco rejeitado pela auditoria"
                 }
@@ -466,6 +527,8 @@ private fun Dashboard(
     onSync: () -> Unit,
     onSaveInitialSetup: (InitialSetupInput) -> Unit,
     nutritionResult: String,
+    dashboardResult: String,
+    onRefreshDashboard: () -> Unit,
     onLookupBarcode: (String) -> Unit,
     onSearchFoods: (String) -> Unit,
     onNextBlock: () -> Unit,
@@ -546,6 +609,11 @@ private fun Dashboard(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("Personal Performance & Health OS", style = MaterialTheme.typography.headlineSmall)
+        Text("Resumo de hoje", style = MaterialTheme.typography.titleMedium)
+        Text(dashboardResult, style = MaterialTheme.typography.bodyMedium)
+        Button(onClick = onRefreshDashboard, modifier = Modifier.fillMaxWidth()) {
+            Text("Atualizar resumo")
+        }
         Text(healthStatus)
         Button(onClick = onCorePermissions, modifier = Modifier.fillMaxWidth()) {
             Text("Autorizar métricas básicas do Health Connect")
@@ -643,7 +711,7 @@ private fun Dashboard(
             )
             if (exercise.restSeconds != null && exercise.restSeconds > 0) {
                 Button(
-                    onClick = { restSecondsRemaining = exercise.restSeconds },
+                    onClick = { restSecondsRemaining = exercise.restSeconds ?: 0 },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
