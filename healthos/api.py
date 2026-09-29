@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 import logging
 import re
 import time
@@ -51,6 +51,7 @@ from .auth import (
 )
 from .config import Settings
 from .contracts import NutritionDataProvider, PackagedFoodProvider
+from .dashboard import DashboardEngine
 from .db import Database
 from .domain import (
     AvailabilityWindow,
@@ -525,6 +526,29 @@ def create_app(
         )
         db.flush()
         return NextBlockResponse(snapshot_id=snapshot.snapshot_id, plan=plan_json, audit=audit_json)
+
+    @app.get("/v1/dashboard")
+    def dashboard(
+        db: DbSession,
+        actor: Actor,
+        today: Annotated[date, Query()],
+    ) -> dict[str, object]:
+        del actor
+        resolver = PlanningStateResolver()
+        planning_now = datetime(today.year, today.month, today.day, 23, 59, 59, tzinfo=UTC)
+        pipeline = resolver.health_pipeline(db, now=planning_now)
+        goals = resolver.goals(db, now=planning_now, pipeline=pipeline)
+        readiness = resolver.readiness(db, now=planning_now, pipeline=pipeline)
+        latest_plan = resolver.latest_plan_snapshot(db)
+        result = DashboardEngine().build(
+            today=today,
+            readiness=readiness,
+            goals=goals,
+            observations=pipeline,
+            performed_sessions=resolver.performed_sessions(db),
+            plan_json=None if latest_plan is None else dict(latest_plan.plan_json),
+        )
+        return jsonable_encoder(asdict(result))
 
     @app.get("/v1/observations/timeline")
     def observations_timeline(
