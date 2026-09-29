@@ -12,6 +12,7 @@ from healthos.training_metrics import (
     SessionMetricsEngine,
     WeeklyTrainingLoadEngine,
     WorkoutReconciliationEngine,
+    LongitudinalTrainingEngine,
 )
 
 
@@ -231,3 +232,86 @@ def test_incomplete_sets_are_excluded_from_volume_and_records() -> None:
     assert result.completed_sets == 1
     assert result.total_reps == 10
     assert result.volume_load_kg == 400.0
+
+
+
+def test_longitudinal_history_tracks_exercises_records_and_weekly_load() -> None:
+    sessions = (
+        PerformedSession(
+            planned_session_id="s1",
+            completed=True,
+            duration_minutes=30,
+            rpe=6,
+            performed_at=datetime(2026, 9, 21, 18, tzinfo=UTC),
+            exercises=(
+                PerformedExercise(
+                    "squat",
+                    (PerformedSet(set_number=1, reps=10, load_kg=30, rir=2),),
+                ),
+            ),
+        ),
+        PerformedSession(
+            planned_session_id="s2",
+            completed=True,
+            duration_minutes=35,
+            rpe=7,
+            performed_at=datetime(2026, 9, 23, 18, tzinfo=UTC),
+            exercises=(
+                PerformedExercise(
+                    "squat",
+                    (PerformedSet(set_number=1, reps=10, load_kg=35, rir=2),),
+                ),
+            ),
+        ),
+        PerformedSession(
+            planned_session_id="s3",
+            completed=True,
+            duration_minutes=40,
+            rpe=8,
+            performed_at=datetime(2026, 9, 25, 18, tzinfo=UTC),
+            exercises=(
+                PerformedExercise(
+                    "squat",
+                    (PerformedSet(set_number=1, reps=10, load_kg=40, rir=2),),
+                ),
+            ),
+        ),
+    )
+    report = LongitudinalTrainingEngine().build(
+        sessions,
+        today=datetime(2026, 9, 29, tzinfo=UTC).date(),
+        days=14,
+    )
+    assert len(report.exercises["squat"]) == 3
+    assert len(report.personal_records) >= 2
+    assert report.weekly
+    loaded_week = next(item for item in report.weekly if item.sessions == 3)
+    assert loaded_week.total_session_rpe_load == 745.0
+    assert loaded_week.monotony is not None
+    assert loaded_week.strain is not None
+
+
+def test_longitudinal_monotony_requires_three_loaded_days() -> None:
+    report = LongitudinalTrainingEngine().build(
+        (
+            PerformedSession(
+                planned_session_id="s1",
+                completed=True,
+                duration_minutes=30,
+                rpe=7,
+                performed_at=datetime(2026, 9, 22, tzinfo=UTC),
+            ),
+            PerformedSession(
+                planned_session_id="s2",
+                completed=True,
+                duration_minutes=30,
+                rpe=7,
+                performed_at=datetime(2026, 9, 24, tzinfo=UTC),
+            ),
+        ),
+        today=datetime(2026, 9, 29, tzinfo=UTC).date(),
+        days=14,
+    )
+    loaded_week = next(item for item in report.weekly if item.sessions == 2)
+    assert loaded_week.monotony is None
+    assert loaded_week.strain is None
