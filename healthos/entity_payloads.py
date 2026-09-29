@@ -103,11 +103,14 @@ class PerformedSetPayload(EntityPayload):
     rpe: float | None = Field(default=None, ge=0, le=10)
     duration_seconds: int | None = Field(default=None, ge=0, le=86400)
     distance_m: float | None = Field(default=None, ge=0, le=1000000)
+    set_type: Literal["warm_up", "working", "back_off", "drop", "amrap"] = "working"
 
 
 class PerformedExercisePayload(EntityPayload):
     exercise_id: str = Field(min_length=1, max_length=128)
     sets: list[PerformedSetPayload] = Field(default_factory=list, max_length=100)
+    group_type: Literal["superset", "circuit"] | None = None
+    group_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class PerformedSessionPayload(EntityPayload):
