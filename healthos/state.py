@@ -12,6 +12,7 @@ from .domain import (
     Event,
     Goal,
     GoalStatus,
+    ExerciseGroupType,
     NutritionTrend,
     PerformedExercise,
     PerformedSession,
@@ -19,6 +20,7 @@ from .domain import (
     Phase,
     ReadinessInput,
     SessionPlan,
+    SetType,
     StrengthProgression,
     TrainingEnvironment,
     TrainingResponse,
@@ -388,9 +390,12 @@ class PlanningStateResolver:
                             rpe=item.rpe,
                             duration_seconds=item.duration_seconds,
                             distance_m=item.distance_m,
+                            set_type=SetType(item.set_type),
                         )
                         for item in exercise.sets
                     ),
+                    group_type=None if exercise.group_type is None else ExerciseGroupType(exercise.group_type),
+                    group_id=exercise.group_id,
                 )
                 for exercise in payload.exercises
             )
