@@ -378,6 +378,7 @@ class MainActivity : ComponentActivity() {
         val recovery = response.optJSONObject("recovery") ?: JSONObject()
         val activity = response.optJSONObject("activity") ?: JSONObject()
         val body = response.optJSONObject("body") ?: JSONObject()
+        val reconciliation = response.optJSONObject("reconciliation") ?: JSONObject()
         val alerts = response.optJSONArray("alerts") ?: JSONArray()
 
         return buildString {
@@ -402,6 +403,10 @@ class MainActivity : ComponentActivity() {
             append(" kg • média móvel ")
             append(display(body, "weight_rolling_average_kg"))
             append(" kg")
+            append("\nHealth Connect: ")
+            append(display(reconciliation, "match_count"))
+            append(" treino(s) reconciliado(s), classificação ")
+            append(display(reconciliation, "evidence_kind"))
             if (alerts.length() > 0) {
                 append("\nAlertas:")
                 for (index in 0 until alerts.length()) {
