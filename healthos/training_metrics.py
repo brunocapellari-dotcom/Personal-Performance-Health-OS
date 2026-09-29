@@ -234,24 +234,26 @@ class CardioLoadEngine:
         self,
         session: PerformedSession,
         *,
-        modality: str,
+        modality: str | None = None,
         average_power_w: float | None = None,
     ) -> CardioLoad:
-        if not modality.strip():
+        resolved_modality = (modality or session.modality or "").strip()
+        if not resolved_modality:
             raise ValueError("modality is required")
-        if average_power_w is not None and average_power_w < 0:
+        resolved_power = average_power_w if average_power_w is not None else session.avg_power_w
+        if resolved_power is not None and resolved_power < 0:
             raise ValueError("average_power_w cannot be negative")
         metrics = SessionMetricsEngine().summarize(session)
         work_kj = None
-        if average_power_w is not None and session.duration_minutes > 0:
-            work_kj = round(average_power_w * session.duration_minutes * 60 / 1000.0, 2)
+        if resolved_power is not None and session.duration_minutes > 0:
+            work_kj = round(resolved_power * session.duration_minutes * 60 / 1000.0, 2)
         return CardioLoad(
-            modality=modality.strip().lower(),
+            modality=resolved_modality.lower(),
             duration_minutes=session.duration_minutes,
             distance_m=metrics.distance_m,
             average_hr_bpm=session.avg_hr_bpm,
             max_hr_bpm=session.max_hr_bpm,
-            average_power_w=average_power_w,
+            average_power_w=resolved_power,
             session_rpe_load=metrics.session_rpe_load,
             external_work_kj=work_kj,
         )
