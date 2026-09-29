@@ -126,6 +126,10 @@ class PerformedSessionPayload(EntityPayload):
     avg_hr_bpm: float | None = Field(default=None, ge=20, le=300)
     max_hr_bpm: float | None = Field(default=None, ge=20, le=300)
     distance_m: float | None = Field(default=None, ge=0, le=1000000)
+    modality: str | None = Field(default=None, min_length=1, max_length=64)
+    avg_power_w: float | None = Field(default=None, ge=0, le=5000)
+    avg_cadence_rpm: float | None = Field(default=None, ge=0, le=300)
+    interval_structure: str | None = Field(default=None, max_length=1000)
     notes: str = Field(default="", max_length=5000)
     exercises: list[PerformedExercisePayload] = Field(default_factory=list, max_length=100)
 
