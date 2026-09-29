@@ -240,6 +240,54 @@ class HealthDataRepository(
         }
     }
 
+    suspend fun recordBodyMeasurement(
+        metric: String,
+        value: Double,
+        unit: String,
+        label: String? = null,
+    ): String {
+        require(metric in setOf("weight", "waist", "abdomen", "chest", "arm", "thigh", "hip", "neck", "other")) {
+            "unsupported body measurement metric"
+        }
+        require(value > 0.0 && value <= 1000.0) { "body measurement value is outside accepted bounds" }
+        val cleanUnit = unit.trim()
+        require(cleanUnit.length in 1..32) { "body measurement unit is required" }
+        val id = UUID.randomUUID().toString()
+        val now = Instant.now()
+        val payload = JSONObject()
+            .put("metric", metric)
+            .put("value", value)
+            .put("unit", cleanUnit)
+            .put("observed_at", now.toString())
+            .put("label", label?.trim()?.takeIf(String::isNotBlank) ?: JSONObject.NULL)
+        stageEntity("body_measurement", id, payload, now.toEpochMilli().coerceAtLeast(1))
+        return id
+    }
+
+    suspend fun recordAssessment(
+        metric: String,
+        value: Double,
+        unit: String,
+        context: String? = null,
+    ): String {
+        val cleanMetric = metric.trim().replace(Regex("\\s+"), " ")
+        val cleanUnit = unit.trim()
+        require(cleanMetric.length in 1..128) { "assessment metric is required" }
+        require(value.isFinite()) { "assessment value must be finite" }
+        require(cleanUnit.length in 1..64) { "assessment unit is required" }
+        val id = UUID.randomUUID().toString()
+        val now = Instant.now()
+        val payload = JSONObject()
+            .put("assessment_id", id)
+            .put("metric", cleanMetric)
+            .put("value", value)
+            .put("unit", cleanUnit)
+            .put("observed_at", now.toString())
+            .put("context", context?.trim()?.takeIf(String::isNotBlank) ?: JSONObject.NULL)
+        stageEntity("assessment_result", id, payload, now.toEpochMilli().coerceAtLeast(1))
+        return id
+    }
+
     suspend fun saveInitialSetup(
         goalDescription: String,
         goalMetric: String,
