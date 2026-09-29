@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from statistics import mean
 from typing import Literal
 
@@ -421,3 +421,169 @@ class WorkoutReconciliationEngine:
                 if index not in matched_observations
             ),
         )
+
+
+
+@dataclass(frozen=True)
+class ExerciseHistoryPoint:
+    performed_at: datetime
+    planned_session_id: str
+    exercise_id: str
+    completed_sets: int
+    total_reps: int
+    volume_load_kg: float
+    max_load_kg: float | None
+    max_reps_single_set: int | None
+    average_rpe: float | None
+    average_rir: float | None
+
+
+@dataclass(frozen=True)
+class WeeklyTrainingLoadPoint:
+    week_start: date
+    week_end: date
+    sessions: int
+    completed_sessions: int
+    total_minutes: int
+    total_session_rpe_load: float
+    total_volume_load_kg: float
+    total_distance_m: float
+    monotony: float | None
+    strain: float | None
+
+
+@dataclass(frozen=True)
+class PersonalRecordEvent:
+    performed_at: datetime
+    planned_session_id: str
+    record: PersonalRecord
+
+
+@dataclass(frozen=True)
+class LongitudinalTrainingReport:
+    exercises: dict[str, tuple[ExerciseHistoryPoint, ...]]
+    weekly: tuple[WeeklyTrainingLoadPoint, ...]
+    personal_records: tuple[PersonalRecordEvent, ...]
+
+
+class LongitudinalTrainingEngine:
+    """Build reproducible training history and workload descriptors from performed facts."""
+
+    def build(
+        self,
+        sessions: tuple[PerformedSession, ...],
+        *,
+        today: date | None = None,
+        days: int = 84,
+    ) -> LongitudinalTrainingReport:
+        if days < 7 or days > 3660:
+            raise ValueError("days must be between 7 and 3660")
+        reference_day = today or datetime.now().date()
+        start_day = reference_day - timedelta(days=days - 1)
+        selected = tuple(
+            sorted(
+                (
+                    session
+                    for session in sessions
+                    if session.performed_at is not None
+                    and start_day <= session.performed_at.date() <= reference_day
+                ),
+                key=lambda session: session.performed_at or datetime.min,
+            )
+        )
+
+        exercises: dict[str, list[ExerciseHistoryPoint]] = {}
+        records: list[PersonalRecordEvent] = []
+        history_before_current: list[PerformedSession] = []
+        metrics_engine = SessionMetricsEngine()
+        records_engine = PersonalRecordEngine()
+
+        for session in selected:
+            performed_at = session.performed_at
+            if performed_at is None:
+                continue
+            metrics = metrics_engine.summarize(session)
+            for exercise in metrics.exercises:
+                exercises.setdefault(exercise.exercise_id, []).append(
+                    ExerciseHistoryPoint(
+                        performed_at=performed_at,
+                        planned_session_id=session.planned_session_id,
+                        exercise_id=exercise.exercise_id,
+                        completed_sets=exercise.completed_sets,
+                        total_reps=exercise.total_reps,
+                        volume_load_kg=exercise.volume_load_kg,
+                        max_load_kg=exercise.max_load_kg,
+                        max_reps_single_set=exercise.max_reps_single_set,
+                        average_rpe=exercise.average_rpe,
+                        average_rir=exercise.average_rir,
+                    )
+                )
+            for record in records_engine.detect(tuple(history_before_current), session):
+                if not record.baseline:
+                    records.append(
+                        PersonalRecordEvent(
+                            performed_at=performed_at,
+                            planned_session_id=session.planned_session_id,
+                            record=record,
+                        )
+                    )
+            history_before_current.append(session)
+
+        weekly: list[WeeklyTrainingLoadPoint] = []
+        cursor = start_day - timedelta(days=start_day.weekday())
+        final_week = reference_day - timedelta(days=reference_day.weekday())
+        while cursor <= final_week:
+            week_end = cursor + timedelta(days=6)
+            week_sessions = tuple(
+                session
+                for session in selected
+                if session.performed_at is not None and cursor <= session.performed_at.date() <= week_end
+            )
+            if week_sessions:
+                aggregate = WeeklyTrainingLoadEngine().summarize(week_sessions)
+                daily_loads = self._daily_session_rpe_loads(week_sessions, cursor)
+                nonzero = tuple(value for value in daily_loads if value > 0)
+                monotony = None
+                strain = None
+                if len(nonzero) >= 3:
+                    daily_mean = mean(daily_loads)
+                    variance = mean((value - daily_mean) ** 2 for value in daily_loads)
+                    std = variance**0.5
+                    if std > 0:
+                        monotony = round(daily_mean / std, 3)
+                        strain = round(aggregate.total_session_rpe_load * monotony, 2)
+                weekly.append(
+                    WeeklyTrainingLoadPoint(
+                        week_start=cursor,
+                        week_end=week_end,
+                        sessions=aggregate.sessions,
+                        completed_sessions=aggregate.completed_sessions,
+                        total_minutes=aggregate.total_minutes,
+                        total_session_rpe_load=aggregate.total_session_rpe_load,
+                        total_volume_load_kg=aggregate.total_volume_load_kg,
+                        total_distance_m=aggregate.total_distance_m,
+                        monotony=monotony,
+                        strain=strain,
+                    )
+                )
+            cursor += timedelta(days=7)
+
+        return LongitudinalTrainingReport(
+            exercises={key: tuple(value) for key, value in sorted(exercises.items())},
+            weekly=tuple(weekly),
+            personal_records=tuple(records),
+        )
+
+    @staticmethod
+    def _daily_session_rpe_loads(
+        sessions: tuple[PerformedSession, ...],
+        week_start: date,
+    ) -> tuple[float, ...]:
+        loads = [0.0] * 7
+        for session in sessions:
+            if session.performed_at is None or session.rpe is None:
+                continue
+            index = (session.performed_at.date() - week_start).days
+            if 0 <= index < 7:
+                loads[index] += session.duration_minutes * session.rpe
+        return tuple(round(value, 2) for value in loads)
