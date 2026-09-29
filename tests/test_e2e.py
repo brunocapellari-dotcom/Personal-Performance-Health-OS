@@ -66,6 +66,11 @@ def test_full_next_block_e2e_uses_all_required_context_and_passes_audit():
     assert result.plan.goal_decisions["synthetic-endurance"].value == "DEVELOP"
     assert all(s.duration_minutes <= env.available_minutes for s in result.plan.sessions)
     assert all("pullup" not in s.exercises for s in result.plan.sessions)
+    assert all(
+        prescription.exercise_id not in prescription.alternatives
+        for session in result.plan.sessions
+        for prescription in session.prescriptions
+    )
 
 
 def test_pain_flag_blocks_normal_training_in_full_plan():
