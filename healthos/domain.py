@@ -328,4 +328,8 @@ class PerformedSession:
     avg_hr_bpm: float | None = None
     max_hr_bpm: float | None = None
     distance_m: float | None = None
+    modality: str | None = None
+    avg_power_w: float | None = None
+    avg_cadence_rpm: float | None = None
+    interval_structure: str | None = None
     exercises: tuple[PerformedExercise, ...] = ()
