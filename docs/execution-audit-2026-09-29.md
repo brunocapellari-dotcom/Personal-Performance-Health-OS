@@ -6,6 +6,7 @@ This document records the repository-backed disposition of the 50-step execution
 
 - **VERIFIED-IN-TREE** — implementation and tests/contracts exist in the repository.
 - **ADDED-IN-BATCH** — capability added by this execution batch; it still requires the complete Cloud Build gate before promotion.
+- **EXPANDED-IN-BATCH** — an existing capability was materially extended in this execution batch.
 - **ACCEPTANCE-BLOCKED** — code path exists, but final proof requires external infrastructure, signing material, provider credentials, or physical-device evidence.
 - **NOT-YET-PROMOTABLE** — deliberately not claimed as production-complete until the exact-SHA full-project gate is green.
 
@@ -35,8 +36,8 @@ This document records the repository-backed disposition of the 50-step execution
 22. Structured plan model — **VERIFIED-IN-TREE** as BlockPlan/SessionPlan/ExercisePrescription.
 23. Performed session separated from plan — **VERIFIED-IN-TREE**.
 24. Set load/reps/duration/distance/RPE/RIR capture — **VERIFIED-IN-TREE**.
-25. Advanced set structures — **NOT-YET-PROMOTABLE**; generic set capture exists, but explicit drop-set/superset/AMRAP semantics remain a later schema/UX enhancement rather than being falsely inferred.
-26. Rest prescription — **VERIFIED-IN-TREE**; interactive countdown UX remains future work.
+25. Advanced set structures — **ADDED-IN-BATCH** with explicit warm-up, working, back-off, drop and AMRAP set semantics plus superset/circuit grouping; old payloads remain backward compatible.
+26. Rest prescription/timer — **EXPANDED-IN-BATCH**; prescription already existed and the Android session UI now provides an interactive countdown from the prescribed rest interval.
 27. Session autosave — **ADDED-IN-BATCH** using the encrypted local Room/SQLCipher state store.
 28. Interrupted-session resume — **ADDED-IN-BATCH** from the latest encrypted workout draft.
 29. Volume/tonnage/density analytics — **ADDED-IN-BATCH** in healthos.training_metrics.
@@ -52,14 +53,14 @@ This document records the repository-backed disposition of the 50-step execution
 39. Bike/walk/run compatible metrics — **VERIFIED-IN-TREE** through generic modality plus distance/speed/cadence/power observations.
 40. Weekly cardiovascular/training load — **ADDED-IN-BATCH** using observed session minutes, sRPE, distance and volume without inventing physiological zones.
 41. Health Connect ingest — **VERIFIED-IN-TREE**.
-42. Health Connect record resolution/reconciliation — **VERIFIED-IN-TREE** for source versions, tombstones and duplicate policies; semantic workout matching remains future refinement.
+42. Health Connect record resolution/reconciliation — **EXPANDED-IN-BATCH**; source versions/tombstones/dedup remain deterministic and a one-to-one workout reconciler now matches app sessions to Health Connect exercise observations by timing/duration. Every semantic match is explicitly labeled **INFERRED** and surfaced in the dashboard.
 43. Body Engine — **VERIFIED-IN-TREE** for weight trend and assessments; **ADDED-IN-BATCH** generic same-unit rolling body metric trend.
 44. Smoothed weight/body trend — **VERIFIED-IN-TREE** and generalized in this batch.
 45. Recovery Engine — **VERIFIED-IN-TREE** with objective deltas plus multi-signal readiness.
 46. Nutrition Engine — **VERIFIED-IN-TREE** for source-aware food data and adaptive TDEE; **ADDED-IN-BATCH** observed daily macro/fiber/hydration/micronutrient aggregation.
 47. TDEE recalibration — **VERIFIED-IN-TREE**.
-48. Dashboard — **VERIFIED-IN-TREE** as an operational Compose screen; polished multi-card analytics UI remains future UX refinement.
-49. Full-system automated E2E — **VERIFIED-IN-TREE** as tests and full-project gate definition; exact current SHA still requires Cloud Build execution.
+48. Dashboard — **EXPANDED-IN-BATCH** with a deterministic dashboard engine, authenticated backend endpoint and Android presentation for planned training, recovery, weekly activity, steps, body trend, goal progress, alerts and inferred Health Connect workout reconciliation.
+49. Full-system automated E2E — **EXPANDED-IN-BATCH** with dashboard/API, advanced-set and reconciliation tests added to the existing suite; exact current SHA still requires Cloud Build execution.
 50. Release Candidate validation — **ACCEPTANCE-BLOCKED** until exact-SHA Cloud Build passes and the physical Android Health Connect/offline/online flow is executed.
 
 ## Batch additions
@@ -75,8 +76,26 @@ The batch intentionally adds no new third-party runtime dependencies. New determ
 - weekly observed training load;
 - generic body-measurement rolling trends;
 - daily observed energy/macros/fiber/hydration/micronutrient totals;
-- encrypted Android workout draft persistence and resume.
+- encrypted Android workout draft persistence and resume;
+- explicit advanced-set and superset/circuit semantics;
+- prescribed-rest countdown in the Android workout flow;
+- inferred app-workout ↔ Health Connect exercise reconciliation;
+- authenticated daily dashboard from backend to Android.
 
 ## Promotion rule
 
 Nothing in this document overrides the repository release policy. New code remains **NOT-YET-PROMOTABLE** until the same commit passes the complete Cloud Build gate. Production-complete status additionally requires the documented physical-device end-to-end acceptance path.
+
+
+## Current CI evidence
+
+GitHub Actions runs for the branch are currently failing before job execution. The inspected jobs report `runner_id = 0` and an empty `steps` array, so they provide evidence of unavailable GitHub execution capacity rather than a code-test failure. The repository therefore continues to use `cloudbuild.yaml` as the intended complete execution gate. No green claim is made until a Cloud Build run for the exact head SHA is available.
+
+## Remaining external acceptance boundary
+
+The code work in the 50-step batch is implemented or represented by existing repository capabilities. The two release proofs that cannot be manufactured inside the repository are:
+
+1. a successful exact-SHA complete Cloud Build run; and
+2. physical Android-device validation of Health Connect permissions, offline autosave/resume, online sync, dashboard refresh and adaptive next-block behavior.
+
+These remain release gates rather than hidden TODOs.
