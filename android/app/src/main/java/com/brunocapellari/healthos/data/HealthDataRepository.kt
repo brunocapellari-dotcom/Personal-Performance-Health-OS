@@ -145,7 +145,11 @@ class HealthDataRepository(
     suspend fun saveWorkoutDraft(draft: WorkoutDraft) {
         require(draft.sessionId.isNotBlank()) { "workout draft sessionId is required" }
         require(draft.duration.length <= 4 && draft.duration.all(Char::isDigit)) { "invalid workout draft duration" }
-        require(draft.rpe.length <= 4) { "invalid workout draft RPE" }
+        val normalizedRpe = draft.rpe.replace(',', '.')
+        require(
+            draft.rpe.isBlank() ||
+                (normalizedRpe.toDoubleOrNull()?.let { it in 0.0..10.0 } == true),
+        ) { "invalid workout draft RPE" }
         require(draft.notes.length <= 5000) { "workout draft notes exceed 5000 characters" }
         database.syncStateDao().upsert(
             SyncStateEntity(
