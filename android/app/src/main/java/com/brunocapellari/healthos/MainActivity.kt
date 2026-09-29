@@ -116,6 +116,8 @@ class MainActivity : ComponentActivity() {
                             onEnroll = ::enroll,
                             onSync = ::syncNow,
                             onSaveInitialSetup = ::saveInitialSetup,
+                            onBodyMeasurement = ::recordBodyMeasurement,
+                            onAssessment = ::recordAssessment,
                             nutritionResult = nutritionText.value,
                             nutritionFoods = nutritionFoods.value,
                             dashboardResult = dashboardText.value,
@@ -232,6 +234,40 @@ class MainActivity : ComponentActivity() {
                 statusText.value = "Configuração inicial salva e sincronizada"
             }.onFailure {
                 statusText.value = "Falha na configuração inicial: ${it.message ?: "erro desconhecido"}"
+            }
+        }
+    }
+
+    private fun recordBodyMeasurement(metric: String, value: Double, unit: String, label: String?) {
+        lifecycleScope.launch {
+            statusText.value = "Registrando medida corporal"
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    container.repository.recordBodyMeasurement(metric, value, unit, label)
+                    container.repository.fullSync()
+                }
+            }.onSuccess {
+                statusText.value = "Medida corporal registrada e sincronizada"
+                refreshDashboard()
+            }.onFailure {
+                statusText.value = "Falha ao registrar medida: ${it.message ?: "erro desconhecido"}"
+            }
+        }
+    }
+
+    private fun recordAssessment(metric: String, value: Double, unit: String, context: String?) {
+        lifecycleScope.launch {
+            statusText.value = "Registrando avaliação"
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    container.repository.recordAssessment(metric, value, unit, context)
+                    container.repository.fullSync()
+                }
+            }.onSuccess {
+                statusText.value = "Avaliação registrada e sincronizada"
+                refreshDashboard()
+            }.onFailure {
+                statusText.value = "Falha ao registrar avaliação: ${it.message ?: "erro desconhecido"}"
             }
         }
     }
@@ -566,6 +602,8 @@ private fun Dashboard(
     onEnroll: (String) -> Unit,
     onSync: () -> Unit,
     onSaveInitialSetup: (InitialSetupInput) -> Unit,
+    onBodyMeasurement: (String, Double, String, String?) -> Unit,
+    onAssessment: (String, Double, String, String?) -> Unit,
     nutritionResult: String,
     nutritionFoods: List<JSONObject>,
     dashboardResult: String,
@@ -635,6 +673,10 @@ private fun Dashboard(
         }
 
         InitialSetupSection(onSave = onSaveInitialSetup)
+        TrackingSection(
+            onBodyMeasurement = onBodyMeasurement,
+            onAssessment = onAssessment,
+        )
         NutritionBarcodeSection(
             resultText = nutritionResult,
             foods = nutritionFoods,
