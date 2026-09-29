@@ -10,9 +10,9 @@ from .domain import (
     AvailabilityWindow,
     Environment,
     Event,
+    ExerciseGroupType,
     Goal,
     GoalStatus,
-    ExerciseGroupType,
     NutritionTrend,
     PerformedExercise,
     PerformedSession,
@@ -277,6 +277,12 @@ class PlanningStateResolver:
             if previous is None or ordering > previous[0]:
                 latest[payload.metric] = (ordering, payload.value)
         return {metric: value for metric, (_, value) in latest.items()}
+
+    def performed_sessions(self, db: Session) -> tuple[PerformedSession, ...]:
+        return self._performed_sessions(db)
+
+    def latest_plan_snapshot(self, db: Session) -> PlanSnapshotModel | None:
+        return self._latest_plan_snapshot(db)
 
     def training_response(self, db: Session) -> TrainingResponse | None:
         derived = self._derive_training_response(db)
