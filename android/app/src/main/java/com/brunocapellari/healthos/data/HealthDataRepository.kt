@@ -144,7 +144,7 @@ class HealthDataRepository(
         require(draft.notes.length <= 5000) { "workout draft notes exceed 5000 characters" }
         database.syncStateDao().upsert(
             SyncStateEntity(
-                key = "workout_draft:${draft.sessionId}",
+                key = "workout_draft:active",
                 value = draft.toJson(),
                 updatedAtEpochMillis = draft.updatedAtEpochMillis,
             ),
@@ -153,13 +153,16 @@ class HealthDataRepository(
 
     suspend fun loadLatestWorkoutDraft(): WorkoutDraft? =
         database.syncStateDao()
-            .latestByPrefix("workout_draft:")
+            .get("workout_draft:active")
             ?.value
             ?.let(WorkoutDraft::fromJson)
 
     suspend fun clearWorkoutDraft(sessionId: String) {
         require(sessionId.isNotBlank()) { "sessionId is required" }
-        database.syncStateDao().delete("workout_draft:$sessionId")
+        val active = loadLatestWorkoutDraft()
+        if (active?.sessionId == sessionId) {
+            database.syncStateDao().delete("workout_draft:active")
+        }
     }
 
     suspend fun saveInitialSetup(
