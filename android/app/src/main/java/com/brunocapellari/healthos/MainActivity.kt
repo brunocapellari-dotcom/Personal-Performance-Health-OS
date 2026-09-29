@@ -51,6 +51,10 @@ data class PlannedExerciseUi(
     val plannedSets: Int,
     val suggestedLoadKg: Double?,
     val targetRir: Double,
+    val restSeconds: Int? = null,
+    val setType: String = "working",
+    val groupType: String? = null,
+    val groupId: String? = null,
 )
 
 data class ExerciseLogValues(
@@ -325,6 +329,10 @@ class MainActivity : ComponentActivity() {
                             plannedSets = exercise.plannedSets,
                             suggestedLoadKg = exercise.suggestedLoadKg,
                             targetRir = exercise.targetRir,
+                            restSeconds = exercise.restSeconds,
+                            setType = exercise.setType,
+                            groupType = exercise.groupType,
+                            groupId = exercise.groupId,
                         )
                     }
                     statusText.value = "Treino em andamento restaurado do armazenamento local"
@@ -399,6 +407,10 @@ class MainActivity : ComponentActivity() {
                                 plannedSets = item.getInt("sets"),
                                 suggestedLoadKg = if (item.isNull("load_kg")) null else item.getDouble("load_kg"),
                                 targetRir = item.getDouble("target_rir"),
+                                restSeconds = if (item.isNull("rest_seconds")) null else item.getInt("rest_seconds"),
+                                setType = item.optString("set_type", "working"),
+                                groupType = item.optString("group_type").takeIf(String::isNotBlank),
+                                groupId = item.optString("group_id").takeIf(String::isNotBlank),
                             )
                         }
                         val draft = WorkoutDraft(
@@ -409,6 +421,10 @@ class MainActivity : ComponentActivity() {
                                     plannedSets = exercise.plannedSets,
                                     suggestedLoadKg = exercise.suggestedLoadKg,
                                     targetRir = exercise.targetRir,
+                                    restSeconds = exercise.restSeconds,
+                                    setType = exercise.setType,
+                                    groupType = exercise.groupType,
+                                    groupId = exercise.groupId,
                                     loadKg = exercise.suggestedLoadKg?.toString() ?: "",
                                 )
                             },
@@ -473,6 +489,13 @@ private fun Dashboard(
     var notes by remember(activeSessionId, matchingDraft?.updatedAtEpochMillis) {
         mutableStateOf(matchingDraft?.notes ?: "")
     }
+    var restSecondsRemaining by remember(activeSessionId) { mutableStateOf(0) }
+    LaunchedEffect(restSecondsRemaining) {
+        if (restSecondsRemaining > 0) {
+            delay(1000)
+            restSecondsRemaining -= 1
+        }
+    }
     val exerciseLogs = remember(activeSessionId, plannedExercises, matchingDraft?.updatedAtEpochMillis) {
         mutableStateMapOf<String, ExerciseLogValues>().apply {
             plannedExercises.forEach { exercise ->
@@ -506,6 +529,10 @@ private fun Dashboard(
                         plannedSets = exercise.plannedSets,
                         suggestedLoadKg = exercise.suggestedLoadKg,
                         targetRir = exercise.targetRir,
+                        restSeconds = exercise.restSeconds,
+                        setType = exercise.setType,
+                        groupType = exercise.groupType,
+                        groupId = exercise.groupId,
                         loadKg = values.loadKg,
                         repsCsv = values.repsCsv,
                         rirCsv = values.rirCsv,
@@ -601,10 +628,33 @@ private fun Dashboard(
         )
         plannedExercises.forEach { exercise ->
             val values = exerciseLogs[exercise.exerciseId] ?: ExerciseLogValues()
+            val groupLabel = when (exercise.groupType) {
+                "superset" -> "superset ${exercise.groupId.orEmpty()}"
+                "circuit" -> "circuito ${exercise.groupId.orEmpty()}"
+                else -> ""
+            }
             Text(
-                "${exercise.exerciseId} — ${exercise.plannedSets} séries; RIR alvo ${exercise.targetRir}",
+                buildString {
+                    append("${exercise.exerciseId} — ${exercise.plannedSets} séries; RIR alvo ${exercise.targetRir}")
+                    append("; tipo ${exercise.setType}")
+                    if (groupLabel.isNotBlank()) append("; $groupLabel")
+                },
                 style = MaterialTheme.typography.bodyMedium,
             )
+            if (exercise.restSeconds != null && exercise.restSeconds > 0) {
+                Button(
+                    onClick = { restSecondsRemaining = exercise.restSeconds },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        if (restSecondsRemaining > 0) {
+                            "Descanso: ${restSecondsRemaining}s"
+                        } else {
+                            "Iniciar descanso de ${exercise.restSeconds}s"
+                        },
+                    )
+                }
+            }
             OutlinedTextField(
                 value = values.loadKg,
                 onValueChange = { value ->
@@ -672,13 +722,16 @@ private fun Dashboard(
                                     .put("set_number", index + 1)
                                     .put("reps", repetitions)
                                     .put("load_kg", load ?: JSONObject.NULL)
-                                    .put("rir", rirs.getOrNull(index) ?: JSONObject.NULL),
+                                    .put("rir", rirs.getOrNull(index) ?: JSONObject.NULL)
+                                    .put("set_type", exercise.setType),
                             )
                         }
                         exercisePayload.put(
                             JSONObject()
                                 .put("exercise_id", exercise.exerciseId)
-                                .put("sets", sets),
+                                .put("sets", sets)
+                                .put("group_type", exercise.groupType ?: JSONObject.NULL)
+                                .put("group_id", exercise.groupId ?: JSONObject.NULL),
                         )
                     }
                     onRecordSession(sessionId, completed, parsedDuration, parsedRpe, notes, exercisePayload)
