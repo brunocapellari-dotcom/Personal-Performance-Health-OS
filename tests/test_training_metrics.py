@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from healthos.domain import PerformedExercise, PerformedSession, PerformedSet
+from healthos.domain import Observation, PerformedExercise, PerformedSession, PerformedSet
 from healthos.training_metrics import (
     BodyMeasurementTrendEngine,
     CardioLoadEngine,
@@ -11,6 +11,7 @@ from healthos.training_metrics import (
     PersonalRecordEngine,
     SessionMetricsEngine,
     WeeklyTrainingLoadEngine,
+    WorkoutReconciliationEngine,
 )
 
 
@@ -159,3 +160,50 @@ def test_invalid_values_are_rejected() -> None:
         NutritionTotalsEngine().summarize((NutritionEntry(energy_kcal=-1),))
     with pytest.raises(ValueError):
         CardioLoadEngine().summarize(_session(), modality="bike", average_power_w=-1)
+
+
+
+def test_workout_reconciliation_matches_nearby_health_connect_exercise() -> None:
+    performed = _session(duration_minutes=30)
+    observation = Observation(
+        observation_id="hc-exercise-1",
+        metric="exercise_duration_min",
+        value=31.0,
+        unit="min",
+        observed_at=datetime(2026, 9, 29, 8, 2, tzinfo=UTC),
+        recorded_at=datetime(2026, 9, 29, 8, 3, tzinfo=UTC),
+        source_id="health_connect:com.synthetic.watch",
+        source_type="health_connect",
+        confidence=0.9,
+    )
+    result = WorkoutReconciliationEngine().reconcile((performed,), (observation,))
+    assert len(result.matches) == 1
+    assert result.matches[0].planned_session_id == "session-1"
+    assert result.matches[0].observation_id == "hc-exercise-1"
+    assert result.matches[0].evidence_kind == "INFERRED"
+    assert result.matches[0].confidence > 0.9
+    assert result.unmatched_performed_session_ids == ()
+    assert result.unmatched_observation_ids == ()
+
+
+def test_workout_reconciliation_does_not_force_distant_records() -> None:
+    performed = _session(duration_minutes=30)
+    observation = Observation(
+        observation_id="hc-exercise-far",
+        metric="exercise_duration_min",
+        value=30.0,
+        unit="min",
+        observed_at=datetime(2026, 9, 29, 12, 0, tzinfo=UTC),
+        recorded_at=datetime(2026, 9, 29, 12, 1, tzinfo=UTC),
+        source_id="health_connect:com.synthetic.watch",
+        source_type="health_connect",
+    )
+    result = WorkoutReconciliationEngine().reconcile((performed,), (observation,))
+    assert result.matches == ()
+    assert result.unmatched_performed_session_ids == ("session-1",)
+    assert result.unmatched_observation_ids == ("hc-exercise-far",)
+
+
+def test_workout_reconciliation_rejects_invalid_tolerance() -> None:
+    with pytest.raises(ValueError):
+        WorkoutReconciliationEngine().reconcile((), (), end_tolerance_minutes=0)
