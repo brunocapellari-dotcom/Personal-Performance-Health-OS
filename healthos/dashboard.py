@@ -9,6 +9,8 @@ from .engines import ReadinessEngine
 from .observation_pipeline import ObservationPipelineResult
 from .training_metrics import (
     BodyMeasurementTrendEngine,
+    NutritionEntry,
+    NutritionTotalsEngine,
     WeeklyTrainingLoadEngine,
     WorkoutReconciliationEngine,
 )
@@ -32,6 +34,7 @@ class DashboardSnapshot:
     recovery: dict[str, Any]
     activity: dict[str, Any]
     body: dict[str, Any]
+    nutrition: dict[str, Any]
     reconciliation: dict[str, Any]
     goals: tuple[DashboardGoalProgress, ...]
     alerts: tuple[str, ...]
@@ -49,6 +52,7 @@ class DashboardEngine:
         observations: ObservationPipelineResult | None,
         performed_sessions: tuple[PerformedSession, ...],
         plan_json: dict[str, Any] | None,
+        nutrition_entries: tuple[NutritionEntry, ...] = (),
     ) -> DashboardSnapshot:
         alerts: list[str] = []
         recovery: dict[str, Any] = {
@@ -113,6 +117,21 @@ class DashboardEngine:
                 "latest_weight_at": trend.latest_at,
             }
 
+        nutrition_totals = NutritionTotalsEngine().summarize(nutrition_entries)
+        target_energy = None
+        if plan_json is not None:
+            raw_target = plan_json.get("nutrition_target_kcal")
+            if isinstance(raw_target, (int, float)):
+                target_energy = float(raw_target)
+        nutrition: dict[str, Any] = {
+            **asdict(nutrition_totals),
+            "entry_count": len(nutrition_entries),
+            "target_energy_kcal": target_energy,
+            "energy_delta_kcal": None
+            if target_energy is None
+            else round(nutrition_totals.energy_kcal - target_energy, 2),
+        }
+
         reconciliation: dict[str, Any] = {
             "matches": [],
             "match_count": 0,
@@ -143,6 +162,7 @@ class DashboardEngine:
             recovery=recovery,
             activity=activity,
             body=body,
+            nutrition=nutrition,
             reconciliation=reconciliation,
             goals=tuple(self._goal_progress(goal) for goal in goals),
             alerts=tuple(dict.fromkeys(alerts)),
