@@ -131,11 +131,11 @@ def test_pairing_token_is_short_lived_role_bound_and_single_use() -> None:
             ttl_seconds=300,
         )
         assert expires_at is not None
-        with pytest.raises(ValueError, match="role"):
+        with pytest.raises(ValueError, match="invalid, expired"):
             consume_pairing_token(db, token=token, requested_role="readonly")
         record = consume_pairing_token(db, token=token, requested_role="owner_device")
         assert record.used_at is not None
-        with pytest.raises(ValueError, match="expired or already used"):
+        with pytest.raises(ValueError, match="invalid, expired"):
             consume_pairing_token(db, token=token, requested_role="owner_device")
 
 
@@ -159,5 +159,23 @@ def test_pairing_token_fails_if_issuing_owner_is_disabled() -> None:
         )
         owner.enabled = False
         db.flush()
-        with pytest.raises(ValueError, match="issuer"):
+        with pytest.raises(ValueError, match="invalid, expired"):
             consume_pairing_token(db, token=token, requested_role="owner_device")
+
+
+
+def test_repeated_challenge_request_reuses_active_challenge() -> None:
+    settings = _settings()
+    database = Database(settings)
+    database.create_schema_for_tests(settings)
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_pem = private_key.public_key().public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("utf-8")
+    with database.session() as db:
+        enroll_device(db, device_id="challenge-reuse", public_key_pem=public_pem)
+        first = create_challenge(db, device_id="challenge-reuse", settings=settings)
+        second = create_challenge(db, device_id="challenge-reuse", settings=settings)
+        assert second.challenge_id == first.challenge_id
+        assert second.nonce == first.nonce
