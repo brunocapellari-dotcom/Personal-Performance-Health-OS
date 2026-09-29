@@ -85,6 +85,19 @@ steps:
     name: ghcr.io/gitleaks/gitleaks:v8.30.1
     args: ["dir", "/workspace", "--redact", "--no-banner"]
 
+  - id: dependency-vulnerability-scan
+    name: ghcr.io/google/osv-scanner@sha256:afd838850ac1a0fcc15ff4a041dc9ba11123c3f0d2666217a5f0fcf9222b55fa
+    args: ["scan", "source", "--recursive", "/workspace"]
+
+  - id: android-mobile-sast
+    name: python:3.13-bookworm
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        python -m pip install --disable-pip-version-check --no-cache-dir "mobsfscan==1.0.1"
+        mobsfscan --type android --config /workspace/.mobsf /workspace/android
+
   - id: container-full-gate
     name: gcr.io/cloud-builders/docker
     entrypoint: bash
