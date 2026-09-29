@@ -63,6 +63,7 @@ from .domain import (
     TrainingEnvironment,
     TrainingResponse,
 )
+from .http_security import RequestBodyLimitMiddleware
 from .models import PlanSnapshotModel
 from .nutrition_sources import OpenFoodFactsProvider, UsdaFoodDataCentralProvider
 from .orchestrator import HealthOS
@@ -103,6 +104,10 @@ def create_app(
     )
     app.state.settings = resolved_settings
     app.state.database = resolved_database
+    app.add_middleware(
+        RequestBodyLimitMiddleware,
+        max_body_bytes=resolved_settings.max_request_body_bytes,
+    )
 
     @app.middleware("http")
     async def request_context(request: Request, call_next):
@@ -130,6 +135,12 @@ def create_app(
         response.headers["Pragma"] = "no-cache"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        if resolved_settings.is_production:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000"
+            response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
         return response
 
     def get_session() -> Iterator[Session]:
