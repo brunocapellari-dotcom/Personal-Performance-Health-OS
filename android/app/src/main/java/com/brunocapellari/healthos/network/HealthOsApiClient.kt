@@ -69,6 +69,11 @@ class HealthOsApiClient(
         bearer = token,
     )
 
+    fun dashboard(token: String, today: String): JSONObject = get(
+        path = "/v1/dashboard?today=$today",
+        bearer = token,
+    )
+
     fun lookupFoodBarcode(token: String, barcode: String): JSONObject {
         require(barcode.matches(Regex("^\\d{4,24}$"))) { "barcode must contain 4 to 24 digits" }
         return get(path = "/v1/nutrition/barcode/$barcode", bearer = token)
