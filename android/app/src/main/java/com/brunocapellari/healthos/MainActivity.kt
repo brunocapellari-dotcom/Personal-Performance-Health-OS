@@ -56,6 +56,7 @@ data class PlannedExerciseUi(
     val setType: String = "working",
     val groupType: String? = null,
     val groupId: String? = null,
+    val alternatives: List<String> = emptyList(),
 )
 
 data class ExerciseLogValues(
@@ -338,6 +339,7 @@ class MainActivity : ComponentActivity() {
                             setType = exercise.setType,
                             groupType = exercise.groupType,
                             groupId = exercise.groupId,
+                            alternatives = exercise.alternatives,
                         )
                     }
                     statusText.value = "Treino em andamento restaurado do armazenamento local"
@@ -476,12 +478,16 @@ class MainActivity : ComponentActivity() {
                                 setType = item.optString("set_type", "working"),
                                 groupType = item.optString("group_type").takeIf(String::isNotBlank),
                                 groupId = item.optString("group_id").takeIf(String::isNotBlank),
+                                alternatives = item.optJSONArray("alternatives")?.let { array ->
+                                    List(array.length()) { alternativeIndex -> array.getString(alternativeIndex) }
+                                }.orEmpty(),
                             )
                         }
                         val draft = WorkoutDraft(
                             sessionId = activeSessionId.value,
                             exercises = activeExercises.value.map { exercise ->
                                 WorkoutDraftExercise(
+                                    plannedExerciseId = exercise.exerciseId,
                                     exerciseId = exercise.exerciseId,
                                     plannedSets = exercise.plannedSets,
                                     suggestedLoadKg = exercise.suggestedLoadKg,
@@ -490,6 +496,7 @@ class MainActivity : ComponentActivity() {
                                     setType = exercise.setType,
                                     groupType = exercise.groupType,
                                     groupId = exercise.groupId,
+                                    alternatives = exercise.alternatives,
                                     loadKg = exercise.suggestedLoadKg?.toString() ?: "",
                                 )
                             },
@@ -564,10 +571,32 @@ private fun Dashboard(
             restSecondsRemaining -= 1
         }
     }
+    val selectedExerciseIds = remember(activeSessionId, plannedExercises, matchingDraft?.updatedAtEpochMillis) {
+        mutableStateMapOf<String, String>().apply {
+            plannedExercises.forEach { exercise ->
+                val saved = matchingDraft?.exercises?.firstOrNull {
+                    it.plannedExerciseId == exercise.exerciseId
+                }
+                put(exercise.exerciseId, saved?.exerciseId ?: exercise.exerciseId)
+            }
+        }
+    }
+    val substitutionReasons = remember(activeSessionId, plannedExercises, matchingDraft?.updatedAtEpochMillis) {
+        mutableStateMapOf<String, String>().apply {
+            plannedExercises.forEach { exercise ->
+                val saved = matchingDraft?.exercises?.firstOrNull {
+                    it.plannedExerciseId == exercise.exerciseId
+                }
+                saved?.substitutionReason?.let { put(exercise.exerciseId, it) }
+            }
+        }
+    }
     val exerciseLogs = remember(activeSessionId, plannedExercises, matchingDraft?.updatedAtEpochMillis) {
         mutableStateMapOf<String, ExerciseLogValues>().apply {
             plannedExercises.forEach { exercise ->
-                val saved = matchingDraft?.exercises?.firstOrNull { it.exerciseId == exercise.exerciseId }
+                val saved = matchingDraft?.exercises?.firstOrNull {
+                    it.plannedExerciseId == exercise.exerciseId
+                }
                 put(
                     exercise.exerciseId,
                     ExerciseLogValues(
@@ -580,7 +609,18 @@ private fun Dashboard(
         }
     }
     val exerciseSnapshot = exerciseLogs.toMap()
-    LaunchedEffect(sessionId, completed, duration, rpe, notes, exerciseSnapshot) {
+    val selectedExerciseSnapshot = selectedExerciseIds.toMap()
+    val substitutionReasonSnapshot = substitutionReasons.toMap()
+    LaunchedEffect(
+        sessionId,
+        completed,
+        duration,
+        rpe,
+        notes,
+        exerciseSnapshot,
+        selectedExerciseSnapshot,
+        substitutionReasonSnapshot,
+    ) {
         if (sessionId.isBlank()) return@LaunchedEffect
         delay(600)
         onSaveWorkoutDraft(
@@ -593,7 +633,8 @@ private fun Dashboard(
                 exercises = plannedExercises.map { exercise ->
                     val values = exerciseSnapshot[exercise.exerciseId] ?: ExerciseLogValues()
                     WorkoutDraftExercise(
-                        exerciseId = exercise.exerciseId,
+                        plannedExerciseId = exercise.exerciseId,
+                        exerciseId = selectedExerciseSnapshot[exercise.exerciseId] ?: exercise.exerciseId,
                         plannedSets = exercise.plannedSets,
                         suggestedLoadKg = exercise.suggestedLoadKg,
                         targetRir = exercise.targetRir,
@@ -601,6 +642,8 @@ private fun Dashboard(
                         setType = exercise.setType,
                         groupType = exercise.groupType,
                         groupId = exercise.groupId,
+                        alternatives = exercise.alternatives,
+                        substitutionReason = substitutionReasonSnapshot[exercise.exerciseId],
                         loadKg = values.loadKg,
                         repsCsv = values.repsCsv,
                         rirCsv = values.rirCsv,
@@ -701,6 +744,7 @@ private fun Dashboard(
         )
         plannedExercises.forEach { exercise ->
             val values = exerciseLogs[exercise.exerciseId] ?: ExerciseLogValues()
+            val selectedExerciseId = selectedExerciseIds[exercise.exerciseId] ?: exercise.exerciseId
             val groupLabel = when (exercise.groupType) {
                 "superset" -> "superset ${exercise.groupId.orEmpty()}"
                 "circuit" -> "circuito ${exercise.groupId.orEmpty()}"
@@ -708,12 +752,33 @@ private fun Dashboard(
             }
             Text(
                 buildString {
-                    append("${exercise.exerciseId} — ${exercise.plannedSets} séries; RIR alvo ${exercise.targetRir}")
+                    append("$selectedExerciseId — ${exercise.plannedSets} séries; RIR alvo ${exercise.targetRir}")
+                    if (selectedExerciseId != exercise.exerciseId) {
+                        append("; planejado ${exercise.exerciseId}")
+                    }
                     append("; tipo ${exercise.setType}")
                     if (groupLabel.isNotBlank()) append("; $groupLabel")
                 },
                 style = MaterialTheme.typography.bodyMedium,
             )
+            if (exercise.alternatives.isNotEmpty()) {
+                Button(
+                    onClick = {
+                        val candidates = listOf(exercise.exerciseId) + exercise.alternatives
+                        val currentIndex = candidates.indexOf(selectedExerciseId).coerceAtLeast(0)
+                        val next = candidates[(currentIndex + 1) % candidates.size]
+                        selectedExerciseIds[exercise.exerciseId] = next
+                        if (next == exercise.exerciseId) {
+                            substitutionReasons.remove(exercise.exerciseId)
+                        } else {
+                            substitutionReasons[exercise.exerciseId] = "user_selected_environment_safe_alternative"
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Substituir exercício")
+                }
+            }
             if (exercise.restSeconds != null && exercise.restSeconds > 0) {
                 Button(
                     onClick = { restSecondsRemaining = exercise.restSeconds ?: 0 },
@@ -801,7 +866,15 @@ private fun Dashboard(
                         }
                         exercisePayload.put(
                             JSONObject()
-                                .put("exercise_id", exercise.exerciseId)
+                                .put("planned_exercise_id", exercise.exerciseId)
+                                .put(
+                                    "exercise_id",
+                                    selectedExerciseIds[exercise.exerciseId] ?: exercise.exerciseId,
+                                )
+                                .put(
+                                    "substitution_reason",
+                                    substitutionReasons[exercise.exerciseId] ?: JSONObject.NULL,
+                                )
                                 .put("sets", sets)
                                 .put("group_type", exercise.groupType ?: JSONObject.NULL)
                                 .put("group_id", exercise.groupId ?: JSONObject.NULL),
