@@ -440,6 +440,10 @@ class PlanningStateResolver:
                     avg_hr_bpm=payload.avg_hr_bpm,
                     max_hr_bpm=payload.max_hr_bpm,
                     distance_m=payload.distance_m,
+                    modality=payload.modality,
+                    avg_power_w=payload.avg_power_w,
+                    avg_cadence_rpm=payload.avg_cadence_rpm,
+                    interval_structure=payload.interval_structure,
                     exercises=exercises,
                 )
             )
