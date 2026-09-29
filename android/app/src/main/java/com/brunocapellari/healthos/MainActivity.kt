@@ -395,6 +395,7 @@ class MainActivity : ComponentActivity() {
         val recovery = response.optJSONObject("recovery") ?: JSONObject()
         val activity = response.optJSONObject("activity") ?: JSONObject()
         val body = response.optJSONObject("body") ?: JSONObject()
+        val nutrition = response.optJSONObject("nutrition") ?: JSONObject()
         val reconciliation = response.optJSONObject("reconciliation") ?: JSONObject()
         val alerts = response.optJSONArray("alerts") ?: JSONArray()
 
@@ -420,6 +421,18 @@ class MainActivity : ComponentActivity() {
             append(" kg • média móvel ")
             append(display(body, "weight_rolling_average_kg"))
             append(" kg")
+            append("\nNutrição: ")
+            append(display(nutrition, "energy_kcal"))
+            append(" kcal • proteína ")
+            append(display(nutrition, "protein_g"))
+            append(" g • fibra ")
+            append(display(nutrition, "fiber_g"))
+            append(" g")
+            if (!nutrition.isNull("target_energy_kcal")) {
+                append(" • meta ")
+                append(display(nutrition, "target_energy_kcal"))
+                append(" kcal")
+            }
             append("\nHealth Connect: ")
             append(display(reconciliation, "match_count"))
             append(" treino(s) reconciliado(s), classificação ")
