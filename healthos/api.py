@@ -5,7 +5,7 @@ import re
 import time
 from collections.abc import Iterator
 from dataclasses import asdict
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 from uuid import uuid4
 
@@ -69,6 +69,7 @@ from .nutrition_sources import OpenFoodFactsProvider, UsdaFoodDataCentralProvide
 from .orchestrator import HealthOS
 from .state import PlanningStateResolver
 from .sync import IncomingChange, current_cursor, pull_changes, push_changes
+from .training_metrics import NutritionEntry, NutritionTotalsEngine
 
 
 LOGGER = logging.getLogger("healthos.api")
@@ -557,6 +558,20 @@ def create_app(
         goals = resolver.goals(db, now=planning_now, pipeline=pipeline)
         readiness = resolver.readiness(db, now=planning_now, pipeline=pipeline)
         latest_plan = resolver.latest_plan_snapshot(db)
+        day_start = datetime(today.year, today.month, today.day, tzinfo=UTC)
+        day_end = day_start + timedelta(days=1)
+        logged_nutrition = tuple(
+            NutritionEntry(
+                energy_kcal=item.energy_kcal or 0.0,
+                protein_g=item.protein_g or 0.0,
+                carbohydrate_g=item.carbohydrate_g or 0.0,
+                fat_g=item.fat_g or 0.0,
+                fiber_g=item.fiber_g or 0.0,
+                hydration_l=item.hydration_l or 0.0,
+                micronutrients=item.micronutrients,
+            )
+            for item in resolver.nutrition_entries(db, start=day_start, end=day_end)
+        )
         result = DashboardEngine().build(
             today=today,
             readiness=readiness,
@@ -564,8 +579,47 @@ def create_app(
             observations=pipeline,
             performed_sessions=resolver.performed_sessions(db),
             plan_json=None if latest_plan is None else dict(latest_plan.plan_json),
+            nutrition_entries=logged_nutrition,
         )
         return asdict(result)
+
+    @app.get("/v1/nutrition/history")
+    def nutrition_history(
+        db: DbSession,
+        actor: Actor,
+        start: Annotated[date, Query()],
+        end: Annotated[date, Query()],
+    ) -> dict[str, object]:
+        del actor
+        if end < start:
+            raise HTTPException(status_code=422, detail="end must be on or after start")
+        if (end - start).days > 366:
+            raise HTTPException(status_code=422, detail="nutrition history range cannot exceed 366 days")
+        resolver = PlanningStateResolver()
+        start_at = datetime(start.year, start.month, start.day, tzinfo=UTC)
+        end_at = datetime(end.year, end.month, end.day, tzinfo=UTC) + timedelta(days=1)
+        entries = resolver.nutrition_entries(db, start=start_at, end=end_at)
+        totals = NutritionTotalsEngine().summarize(
+            tuple(
+                NutritionEntry(
+                    energy_kcal=item.energy_kcal or 0.0,
+                    protein_g=item.protein_g or 0.0,
+                    carbohydrate_g=item.carbohydrate_g or 0.0,
+                    fat_g=item.fat_g or 0.0,
+                    fiber_g=item.fiber_g or 0.0,
+                    hydration_l=item.hydration_l or 0.0,
+                    micronutrients=item.micronutrients,
+                )
+                for item in entries
+            )
+        )
+        return jsonable_encoder(
+            {
+                "entries": [item.model_dump(mode="json") for item in entries],
+                "totals": asdict(totals),
+                "count": len(entries),
+            }
+        )
 
     @app.get("/v1/observations/timeline")
     def observations_timeline(
