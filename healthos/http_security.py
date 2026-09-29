@@ -1,14 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
-from typing import Any
-
 from starlette.responses import JSONResponse
-
-ASGIApp = Callable[
-    [dict[str, Any], Callable[[], Awaitable[dict[str, Any]]], Callable[[dict[str, Any]], Awaitable[None]]],
-    Awaitable[None],
-]
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 
 class RequestBodyTooLarge(Exception):
@@ -24,13 +17,8 @@ class RequestBodyLimitMiddleware:
         self.app = app
         self.max_body_bytes = max_body_bytes
 
-    async def __call__(
-        self,
-        scope: dict[str, Any],
-        receive: Callable[[], Awaitable[dict[str, Any]]],
-        send: Callable[[dict[str, Any]], Awaitable[None]],
-    ) -> None:
-        if scope.get("type") != "http":
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
@@ -41,15 +29,13 @@ class RequestBodyLimitMiddleware:
 
         received = 0
 
-        async def limited_receive() -> dict[str, Any]:
+        async def limited_receive() -> Message:
             nonlocal received
             message = await receive()
-            if message.get("type") == "http.request":
-                body = message.get("body", b"")
-                if isinstance(body, bytes):
-                    received += len(body)
-                    if received > self.max_body_bytes:
-                        raise RequestBodyTooLarge
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_body_bytes:
+                    raise RequestBodyTooLarge
             return message
 
         try:
@@ -58,7 +44,7 @@ class RequestBodyLimitMiddleware:
             await self._reject(scope, receive, send)
 
     @staticmethod
-    def _content_length(scope: dict[str, Any]) -> int | None:
+    def _content_length(scope: Scope) -> int | None:
         for raw_name, raw_value in scope.get("headers", []):
             if raw_name.lower() != b"content-length":
                 continue
@@ -70,11 +56,7 @@ class RequestBodyLimitMiddleware:
         return None
 
     @staticmethod
-    async def _reject(
-        scope: dict[str, Any],
-        receive: Callable[[], Awaitable[dict[str, Any]]],
-        send: Callable[[dict[str, Any]], Awaitable[None]],
-    ) -> None:
+    async def _reject(scope: Scope, receive: Receive, send: Send) -> None:
         response = JSONResponse(
             status_code=413,
             content={"detail": "request body exceeds configured limit"},
