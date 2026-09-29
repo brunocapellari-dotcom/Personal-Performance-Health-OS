@@ -136,22 +136,23 @@ class SessionMetricsEngine:
 
     @staticmethod
     def _exercise_metrics(exercise: PerformedExercise) -> ExerciseMetrics:
-        reps = tuple(item.reps for item in exercise.sets if item.reps is not None)
-        loads = tuple(item.load_kg for item in exercise.sets if item.load_kg is not None)
-        rpes = tuple(item.rpe for item in exercise.sets if item.rpe is not None)
-        rirs = tuple(item.rir for item in exercise.sets if item.rir is not None)
+        completed = tuple(item for item in exercise.sets if item.completed)
+        reps = tuple(item.reps for item in completed if item.reps is not None)
+        loads = tuple(item.load_kg for item in completed if item.load_kg is not None)
+        rpes = tuple(item.rpe for item in completed if item.rpe is not None)
+        rirs = tuple(item.rir for item in completed if item.rir is not None)
         volume = sum(
             float(item.load_kg) * int(item.reps)
-            for item in exercise.sets
+            for item in completed
             if item.load_kg is not None and item.reps is not None
         )
         return ExerciseMetrics(
             exercise_id=exercise.exercise_id,
-            completed_sets=len(exercise.sets),
+            completed_sets=len(completed),
             total_reps=sum(int(value) for value in reps),
             volume_load_kg=round(volume, 3),
-            work_seconds=sum(item.duration_seconds or 0 for item in exercise.sets),
-            distance_m=round(sum(item.distance_m or 0.0 for item in exercise.sets), 3),
+            work_seconds=sum(item.duration_seconds or 0 for item in completed),
+            distance_m=round(sum(item.distance_m or 0.0 for item in completed), 3),
             max_load_kg=None if not loads else max(float(value) for value in loads),
             max_reps_single_set=None if not reps else max(int(value) for value in reps),
             average_rpe=None if not rpes else round(mean(float(value) for value in rpes), 2),
