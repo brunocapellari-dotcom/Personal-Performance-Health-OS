@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from .domain import Goal, PerformedSession, ReadinessInput
@@ -85,7 +85,7 @@ class DashboardEngine:
             today,
         )
 
-        weights: tuple[tuple[Any, float], ...] = ()
+        weights: tuple[tuple[datetime, float], ...] = ()
         if observations is not None:
             weights = tuple(
                 (item.observed_at, float(item.value))
