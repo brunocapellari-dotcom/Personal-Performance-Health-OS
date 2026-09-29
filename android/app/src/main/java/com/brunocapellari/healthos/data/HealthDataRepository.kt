@@ -158,7 +158,7 @@ class HealthDataRepository(
         }
             .firstOrNull { key -> key.lowercase().contains("fiber") }
             ?.let { key -> micronutrients.optDouble(key, Double.NaN) }
-            ?.takeIf(Double::isFinite)
+            ?.takeIf { it.isFinite() }
 
         val entryId = UUID.randomUUID().toString()
         val now = Instant.now()
