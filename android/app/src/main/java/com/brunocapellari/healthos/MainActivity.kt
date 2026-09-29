@@ -64,6 +64,7 @@ class MainActivity : ComponentActivity() {
     private val nutritionText = mutableStateOf("")
     private val nutritionFoods = mutableStateOf<List<JSONObject>>(emptyList())
     private val dashboardText = mutableStateOf("Resumo diário ainda não carregado")
+    private val historyText = mutableStateOf("Histórico ainda não carregado")
     private val workoutDraft = mutableStateOf<WorkoutDraft?>(null)
 
     private val permissionsLauncher = registerForActivityResult(
@@ -121,7 +122,9 @@ class MainActivity : ComponentActivity() {
                             nutritionResult = nutritionText.value,
                             nutritionFoods = nutritionFoods.value,
                             dashboardResult = dashboardText.value,
+                            historyResult = historyText.value,
                             onRefreshDashboard = ::refreshDashboard,
+                            onRefreshHistory = ::refreshHistory,
                             onLookupBarcode = ::lookupFoodBarcode,
                             onSearchFoods = ::searchFoods,
                             onLogFood = ::logFood,
@@ -439,6 +442,59 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun refreshHistory() {
+        lifecycleScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val today = LocalDate.now()
+                    val training = container.repository.loadTrainingHistory(days = 84, today = today)
+                    val nutrition = container.repository.loadNutritionHistory(today.minusDays(13), today)
+                    training to nutrition
+                }
+            }.onSuccess { (training, nutrition) ->
+                historyText.value = formatHistory(training, nutrition)
+            }.onFailure {
+                historyText.value = "Histórico indisponível: ${it.message ?: "erro desconhecido"}"
+            }
+        }
+    }
+
+    private fun formatHistory(training: JSONObject, nutrition: JSONObject): String {
+        val weekly = training.optJSONArray("weekly") ?: JSONArray()
+        val records = training.optJSONArray("personal_records") ?: JSONArray()
+        val exercises = training.optJSONObject("exercises") ?: JSONObject()
+        val nutritionTotals = nutrition.optJSONObject("totals") ?: JSONObject()
+        val exerciseCount = exercises.keys().asSequence().count()
+
+        return buildString {
+            append("Treino (84 dias): ")
+            append(exerciseCount)
+            append(" exercícios com histórico • ")
+            append(records.length())
+            append(" PRs")
+            if (weekly.length() > 0) {
+                val lastWeek = weekly.getJSONObject(weekly.length() - 1)
+                append("\nÚltima semana com treino: ")
+                append(lastWeek.optInt("sessions"))
+                append(" sessões • ")
+                append(lastWeek.optInt("total_minutes"))
+                append(" min • carga sRPE ")
+                append(lastWeek.optDouble("total_session_rpe_load"))
+                if (!lastWeek.isNull("monotony")) {
+                    append(" • monotonia ")
+                    append(lastWeek.optDouble("monotony"))
+                    append(" • strain ")
+                    append(lastWeek.optDouble("strain"))
+                }
+            }
+            append("\nNutrição (14 dias): ")
+            append(nutrition.optInt("count"))
+            append(" lançamentos • ")
+            append(nutritionTotals.optDouble("energy_kcal"))
+            append(" kcal registradas no período")
+        }
+    }
+
     private fun refreshDashboard() {
         lifecycleScope.launch {
             runCatching {
@@ -635,7 +691,9 @@ private fun Dashboard(
     nutritionResult: String,
     nutritionFoods: List<JSONObject>,
     dashboardResult: String,
+    historyResult: String,
     onRefreshDashboard: () -> Unit,
+    onRefreshHistory: () -> Unit,
     onLookupBarcode: (String) -> Unit,
     onSearchFoods: (String) -> Unit,
     onLogFood: (JSONObject, Double, String) -> Unit,
@@ -654,6 +712,10 @@ private fun Dashboard(
         Button(onClick = onRefreshDashboard, modifier = Modifier.fillMaxWidth()) {
             Text("Atualizar resumo")
         }
+        HistorySection(
+            summary = historyResult,
+            onRefresh = onRefreshHistory,
+        )
 
         Text(healthStatus)
         Button(onClick = onCorePermissions, modifier = Modifier.fillMaxWidth()) {
