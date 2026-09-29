@@ -95,6 +95,10 @@ class PerformanceDirector:
                         else None
                     ),
                     rest_seconds=rest,
+                    alternatives=tuple(
+                        item.exercise_id
+                        for item in self.exercise_selector.substitutions(environment, exercise_id)
+                    ),
                 )
                 for exercise_id in exercise_ids
             )
