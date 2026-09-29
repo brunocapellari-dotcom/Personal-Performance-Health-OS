@@ -66,9 +66,17 @@ data class WorkoutDraft(
                         WorkoutDraftExercise(
                             exerciseId = exercise.getString("exercise_id"),
                             plannedSets = exercise.getInt("planned_sets"),
-                            suggestedLoadKg = if (exercise.isNull("suggested_load_kg")) null else exercise.getDouble("suggested_load_kg"),
+                            suggestedLoadKg = if (exercise.isNull("suggested_load_kg")) {
+                                null
+                            } else {
+                                exercise.getDouble("suggested_load_kg")
+                            },
                             targetRir = exercise.getDouble("target_rir"),
-                            restSeconds = if (exercise.isNull("rest_seconds")) null else exercise.getInt("rest_seconds"),
+                            restSeconds = if (exercise.isNull("rest_seconds")) {
+                                null
+                            } else {
+                                exercise.getInt("rest_seconds")
+                            },
                             setType = exercise.optString("set_type", "working"),
                             groupType = exercise.optString("group_type").takeIf(String::isNotBlank),
                             groupId = exercise.optString("group_id").takeIf(String::isNotBlank),
