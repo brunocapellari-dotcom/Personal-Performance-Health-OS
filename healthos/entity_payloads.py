@@ -108,6 +108,8 @@ class PerformedSetPayload(EntityPayload):
 
 class PerformedExercisePayload(EntityPayload):
     exercise_id: str = Field(min_length=1, max_length=128)
+    planned_exercise_id: str | None = Field(default=None, min_length=1, max_length=128)
+    substitution_reason: str | None = Field(default=None, min_length=1, max_length=500)
     sets: list[PerformedSetPayload] = Field(default_factory=list, max_length=100)
     group_type: Literal["superset", "circuit"] | None = None
     group_id: str | None = Field(default=None, min_length=1, max_length=128)
