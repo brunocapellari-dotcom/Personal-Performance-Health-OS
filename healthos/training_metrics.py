@@ -5,7 +5,7 @@ from datetime import datetime
 from statistics import mean
 from typing import Literal
 
-from .domain import PerformedExercise, PerformedSession
+from .domain import Observation, PerformedExercise, PerformedSession
 
 
 @dataclass(frozen=True)
@@ -324,4 +324,97 @@ class NutritionTotalsEngine:
             fiber_g=round(sum(item.fiber_g for item in entries), 2),
             hydration_l=round(sum(item.hydration_l for item in entries), 3),
             micronutrients={key: round(value, 4) for key, value in sorted(micros.items())},
+        )
+
+
+@dataclass(frozen=True)
+class WorkoutMatch:
+    planned_session_id: str
+    observation_id: str
+    source_id: str
+    end_delta_minutes: float
+    duration_delta_minutes: float
+    confidence: float
+    evidence_kind: Literal["INFERRED"] = "INFERRED"
+
+
+@dataclass(frozen=True)
+class WorkoutReconciliationResult:
+    matches: tuple[WorkoutMatch, ...]
+    unmatched_performed_session_ids: tuple[str, ...]
+    unmatched_observation_ids: tuple[str, ...]
+
+
+class WorkoutReconciliationEngine:
+    """One-to-one heuristic reconciliation of app sessions and Health Connect exercise observations.
+
+    A match is explicitly INFERRED: source metadata remains authoritative and the engine never
+    turns an inferred match into a claim that both records are the same underlying event.
+    """
+
+    def reconcile(
+        self,
+        sessions: tuple[PerformedSession, ...],
+        observations: tuple[Observation, ...],
+        *,
+        end_tolerance_minutes: float = 90.0,
+    ) -> WorkoutReconciliationResult:
+        if end_tolerance_minutes <= 0:
+            raise ValueError("end_tolerance_minutes must be positive")
+
+        exercise_observations = tuple(
+            item
+            for item in observations
+            if item.metric == "exercise_duration_min" and isinstance(item.value, (int, float))
+        )
+        candidates: list[tuple[float, int, int, float, float]] = []
+        for session_index, session in enumerate(sessions):
+            if session.performed_at is None:
+                continue
+            duration_tolerance = max(15.0, session.duration_minutes * 0.75)
+            for observation_index, observation in enumerate(exercise_observations):
+                try:
+                    end_delta = abs((observation.observed_at - session.performed_at).total_seconds()) / 60.0
+                except TypeError:
+                    continue
+                duration_delta = abs(float(observation.value) - session.duration_minutes)
+                if end_delta > end_tolerance_minutes or duration_delta > duration_tolerance:
+                    continue
+                score = (end_delta / end_tolerance_minutes) + (duration_delta / duration_tolerance)
+                candidates.append((score, session_index, observation_index, end_delta, duration_delta))
+
+        matched_sessions: set[int] = set()
+        matched_observations: set[int] = set()
+        matches: list[WorkoutMatch] = []
+        for score, session_index, observation_index, end_delta, duration_delta in sorted(candidates):
+            if session_index in matched_sessions or observation_index in matched_observations:
+                continue
+            session = sessions[session_index]
+            observation = exercise_observations[observation_index]
+            confidence = round(max(0.0, min(1.0, 1.0 - (score / 2.0))), 3)
+            matches.append(
+                WorkoutMatch(
+                    planned_session_id=session.planned_session_id,
+                    observation_id=observation.observation_id,
+                    source_id=observation.source_id,
+                    end_delta_minutes=round(end_delta, 2),
+                    duration_delta_minutes=round(duration_delta, 2),
+                    confidence=confidence,
+                )
+            )
+            matched_sessions.add(session_index)
+            matched_observations.add(observation_index)
+
+        return WorkoutReconciliationResult(
+            matches=tuple(matches),
+            unmatched_performed_session_ids=tuple(
+                session.planned_session_id
+                for index, session in enumerate(sessions)
+                if index not in matched_sessions
+            ),
+            unmatched_observation_ids=tuple(
+                observation.observation_id
+                for index, observation in enumerate(exercise_observations)
+                if index not in matched_observations
+            ),
         )
