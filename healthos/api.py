@@ -69,7 +69,7 @@ from .nutrition_sources import OpenFoodFactsProvider, UsdaFoodDataCentralProvide
 from .orchestrator import HealthOS
 from .state import PlanningStateResolver
 from .sync import IncomingChange, current_cursor, pull_changes, push_changes
-from .training_metrics import NutritionEntry, NutritionTotalsEngine
+from .training_metrics import LongitudinalTrainingEngine, NutritionEntry, NutritionTotalsEngine
 
 
 LOGGER = logging.getLogger("healthos.api")
@@ -582,6 +582,22 @@ def create_app(
             nutrition_entries=logged_nutrition,
         )
         return asdict(result)
+
+    @app.get("/v1/training/history")
+    def training_history(
+        db: DbSession,
+        actor: Actor,
+        days: Annotated[int, Query(ge=7, le=3660)] = 84,
+        today: Annotated[date | None, Query()] = None,
+    ) -> dict[str, object]:
+        del actor
+        reference_day = today or datetime.now(UTC).date()
+        report = LongitudinalTrainingEngine().build(
+            PlanningStateResolver().performed_sessions(db),
+            today=reference_day,
+            days=days,
+        )
+        return jsonable_encoder(asdict(report))
 
     @app.get("/v1/nutrition/history")
     def nutrition_history(
