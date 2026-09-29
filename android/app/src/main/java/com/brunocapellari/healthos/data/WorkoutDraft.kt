@@ -40,6 +40,7 @@ data class WorkoutDraft(
     val exercises: List<WorkoutDraftExercise> = emptyList(),
     val startedAtEpochMillis: Long = System.currentTimeMillis(),
     val restDeadlineEpochMillis: Long? = null,
+    val restPausedRemainingSeconds: Int? = null,
     val restExerciseId: String? = null,
     val updatedAtEpochMillis: Long = System.currentTimeMillis(),
 ) {
@@ -93,6 +94,7 @@ data class WorkoutDraft(
             .put("exercises", exerciseArray)
             .put("started_at_epoch_millis", startedAtEpochMillis)
             .put("rest_deadline_epoch_millis", restDeadlineEpochMillis ?: JSONObject.NULL)
+            .put("rest_paused_remaining_seconds", restPausedRemainingSeconds ?: JSONObject.NULL)
             .put("rest_exercise_id", restExerciseId ?: JSONObject.NULL)
             .put("updated_at_epoch_millis", updatedAtEpochMillis)
             .toString()
@@ -141,6 +143,7 @@ data class WorkoutDraft(
                     json.optLong("updated_at_epoch_millis", System.currentTimeMillis()),
                 ),
                 restDeadlineEpochMillis = json.optNullableLong("rest_deadline_epoch_millis"),
+                restPausedRemainingSeconds = json.optNullableInt("rest_paused_remaining_seconds"),
                 restExerciseId = json.optNullableString("rest_exercise_id"),
                 updatedAtEpochMillis = json.optLong("updated_at_epoch_millis", 0L),
             )
