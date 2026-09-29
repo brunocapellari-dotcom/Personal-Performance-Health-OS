@@ -17,6 +17,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -28,7 +29,10 @@ import androidx.compose.ui.unit.dp
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.lifecycleScope
+import com.brunocapellari.healthos.data.WorkoutDraft
+import com.brunocapellari.healthos.data.WorkoutDraftExercise
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -62,6 +66,7 @@ class MainActivity : ComponentActivity() {
     private val activeExercises = mutableStateOf<List<PlannedExerciseUi>>(emptyList())
     private val pairingTokenText = mutableStateOf("")
     private val nutritionText = mutableStateOf("")
+    private val workoutDraft = mutableStateOf<WorkoutDraft?>(null)
 
     private val permissionsLauncher = registerForActivityResult(
         PermissionController.createRequestPermissionResultContract(),
@@ -80,6 +85,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         refreshHealthStatus()
+        restoreWorkoutDraft()
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -116,7 +122,9 @@ class MainActivity : ComponentActivity() {
                             onSearchFoods = ::searchFoods,
                             activeSessionId = activeSessionId.value,
                             plannedExercises = activeExercises.value,
+                            initialDraft = workoutDraft.value,
                             onNextBlock = ::nextBlock,
+                            onSaveWorkoutDraft = ::saveWorkoutDraft,
                             onRecordSession = ::recordSession,
                         )
                     }
@@ -303,6 +311,40 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun restoreWorkoutDraft() {
+        lifecycleScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { container.repository.loadLatestWorkoutDraft() }
+            }.onSuccess { draft ->
+                if (draft != null) {
+                    workoutDraft.value = draft
+                    activeSessionId.value = draft.sessionId
+                    activeExercises.value = draft.exercises.map { exercise ->
+                        PlannedExerciseUi(
+                            exerciseId = exercise.exerciseId,
+                            plannedSets = exercise.plannedSets,
+                            suggestedLoadKg = exercise.suggestedLoadKg,
+                            targetRir = exercise.targetRir,
+                        )
+                    }
+                    statusText.value = "Treino em andamento restaurado do armazenamento local"
+                }
+            }.onFailure {
+                statusText.value = "Não foi possível restaurar o treino em andamento"
+            }
+        }
+    }
+
+    private fun saveWorkoutDraft(draft: WorkoutDraft) {
+        lifecycleScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { container.repository.saveWorkoutDraft(draft) }
+            }.onFailure {
+                statusText.value = "Falha ao salvar rascunho local do treino"
+            }
+        }
+    }
+
     private fun recordSession(
         plannedSessionId: String,
         completed: Boolean,
@@ -324,8 +366,12 @@ class MainActivity : ComponentActivity() {
                         exercises = exercises,
                     )
                     container.repository.fullSync()
+                    container.repository.clearWorkoutDraft(plannedSessionId)
                 }
             }.onSuccess {
+                workoutDraft.value = null
+                activeSessionId.value = ""
+                activeExercises.value = emptyList()
                 statusText.value = "Treino realizado registrado e sincronizado"
             }.onFailure {
                 statusText.value = "Falha ao registrar treino: ${it.message ?: "erro desconhecido"}"
@@ -355,6 +401,20 @@ class MainActivity : ComponentActivity() {
                                 targetRir = item.getDouble("target_rir"),
                             )
                         }
+                        val draft = WorkoutDraft(
+                            sessionId = activeSessionId.value,
+                            exercises = activeExercises.value.map { exercise ->
+                                WorkoutDraftExercise(
+                                    exerciseId = exercise.exerciseId,
+                                    plannedSets = exercise.plannedSets,
+                                    suggestedLoadKg = exercise.suggestedLoadKg,
+                                    targetRir = exercise.targetRir,
+                                    loadKg = exercise.suggestedLoadKg?.toString() ?: "",
+                                )
+                            },
+                        )
+                        workoutDraft.value = draft
+                        saveWorkoutDraft(draft)
                     } else {
                         activeSessionId.value = ""
                         activeExercises.value = emptyList()
@@ -378,6 +438,7 @@ private fun Dashboard(
     operationStatus: String,
     activeSessionId: String,
     plannedExercises: List<PlannedExerciseUi>,
+    initialDraft: WorkoutDraft?,
     pairingToken: String,
     onCorePermissions: () -> Unit,
     onPerformancePermissions: () -> Unit,
@@ -392,25 +453,66 @@ private fun Dashboard(
     onLookupBarcode: (String) -> Unit,
     onSearchFoods: (String) -> Unit,
     onNextBlock: () -> Unit,
+    onSaveWorkoutDraft: (WorkoutDraft) -> Unit,
     onRecordSession: (String, Boolean, Int, Double?, String, JSONArray) -> Unit,
 ) {
     var bootstrapToken by remember { mutableStateOf("") }
-    var sessionId by remember(activeSessionId) { mutableStateOf(activeSessionId) }
-    var completed by remember { mutableStateOf(true) }
-    var duration by remember { mutableStateOf("") }
-    var rpe by remember { mutableStateOf("") }
-    var notes by remember { mutableStateOf("") }
-    val exerciseLogs = remember(activeSessionId, plannedExercises) {
+    val matchingDraft = initialDraft?.takeIf { it.sessionId == activeSessionId }
+    var sessionId by remember(activeSessionId, matchingDraft?.updatedAtEpochMillis) {
+        mutableStateOf(matchingDraft?.sessionId ?: activeSessionId)
+    }
+    var completed by remember(activeSessionId, matchingDraft?.updatedAtEpochMillis) {
+        mutableStateOf(matchingDraft?.completed ?: true)
+    }
+    var duration by remember(activeSessionId, matchingDraft?.updatedAtEpochMillis) {
+        mutableStateOf(matchingDraft?.duration ?: "")
+    }
+    var rpe by remember(activeSessionId, matchingDraft?.updatedAtEpochMillis) {
+        mutableStateOf(matchingDraft?.rpe ?: "")
+    }
+    var notes by remember(activeSessionId, matchingDraft?.updatedAtEpochMillis) {
+        mutableStateOf(matchingDraft?.notes ?: "")
+    }
+    val exerciseLogs = remember(activeSessionId, plannedExercises, matchingDraft?.updatedAtEpochMillis) {
         mutableStateMapOf<String, ExerciseLogValues>().apply {
             plannedExercises.forEach { exercise ->
+                val saved = matchingDraft?.exercises?.firstOrNull { it.exerciseId == exercise.exerciseId }
                 put(
                     exercise.exerciseId,
                     ExerciseLogValues(
-                        loadKg = exercise.suggestedLoadKg?.toString() ?: "",
+                        loadKg = saved?.loadKg ?: exercise.suggestedLoadKg?.toString().orEmpty(),
+                        repsCsv = saved?.repsCsv.orEmpty(),
+                        rirCsv = saved?.rirCsv.orEmpty(),
                     ),
                 )
             }
         }
+    }
+    val exerciseSnapshot = exerciseLogs.toMap()
+    LaunchedEffect(sessionId, completed, duration, rpe, notes, exerciseSnapshot) {
+        if (sessionId.isBlank()) return@LaunchedEffect
+        delay(600)
+        onSaveWorkoutDraft(
+            WorkoutDraft(
+                sessionId = sessionId,
+                completed = completed,
+                duration = duration,
+                rpe = rpe,
+                notes = notes,
+                exercises = plannedExercises.map { exercise ->
+                    val values = exerciseSnapshot[exercise.exerciseId] ?: ExerciseLogValues()
+                    WorkoutDraftExercise(
+                        exerciseId = exercise.exerciseId,
+                        plannedSets = exercise.plannedSets,
+                        suggestedLoadKg = exercise.suggestedLoadKg,
+                        targetRir = exercise.targetRir,
+                        loadKg = values.loadKg,
+                        repsCsv = values.repsCsv,
+                        rirCsv = values.rirCsv,
+                    )
+                },
+            ),
+        )
     }
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -580,9 +682,6 @@ private fun Dashboard(
                         )
                     }
                     onRecordSession(sessionId, completed, parsedDuration, parsedRpe, notes, exercisePayload)
-                    duration = ""
-                    rpe = ""
-                    notes = ""
                 }
             },
             modifier = Modifier.fillMaxWidth(),
