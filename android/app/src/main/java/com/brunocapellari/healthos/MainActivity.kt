@@ -118,6 +118,7 @@ class MainActivity : ComponentActivity() {
                             onSaveInitialSetup = ::saveInitialSetup,
                             onBodyMeasurement = ::recordBodyMeasurement,
                             onAssessment = ::recordAssessment,
+                            onRecordCardio = ::recordCardio,
                             nutritionResult = nutritionText.value,
                             nutritionFoods = nutritionFoods.value,
                             dashboardResult = dashboardText.value,
@@ -268,6 +269,34 @@ class MainActivity : ComponentActivity() {
                 refreshDashboard()
             }.onFailure {
                 statusText.value = "Falha ao registrar avaliação: ${it.message ?: "erro desconhecido"}"
+            }
+        }
+    }
+
+    private fun recordCardio(input: ManualCardioInput) {
+        lifecycleScope.launch {
+            statusText.value = "Registrando cardio"
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    container.repository.recordManualCardioSession(
+                        modality = input.modality,
+                        durationMinutes = input.durationMinutes,
+                        rpe = input.rpe,
+                        distanceM = input.distanceM,
+                        avgHrBpm = input.avgHrBpm,
+                        maxHrBpm = input.maxHrBpm,
+                        avgPowerW = input.avgPowerW,
+                        avgCadenceRpm = input.avgCadenceRpm,
+                        intervalStructure = input.intervalStructure,
+                        notes = input.notes,
+                    )
+                    container.repository.fullSync()
+                }
+            }.onSuccess {
+                statusText.value = "Cardio registrado e sincronizado"
+                refreshDashboard()
+            }.onFailure {
+                statusText.value = "Falha ao registrar cardio: ${it.message ?: "erro desconhecido"}"
             }
         }
     }
@@ -604,6 +633,7 @@ private fun Dashboard(
     onSaveInitialSetup: (InitialSetupInput) -> Unit,
     onBodyMeasurement: (String, Double, String, String?) -> Unit,
     onAssessment: (String, Double, String, String?) -> Unit,
+    onRecordCardio: (ManualCardioInput) -> Unit,
     nutritionResult: String,
     nutritionFoods: List<JSONObject>,
     dashboardResult: String,
@@ -677,6 +707,7 @@ private fun Dashboard(
             onBodyMeasurement = onBodyMeasurement,
             onAssessment = onAssessment,
         )
+        CardioSection(onSave = onRecordCardio)
         NutritionBarcodeSection(
             resultText = nutritionResult,
             foods = nutritionFoods,
