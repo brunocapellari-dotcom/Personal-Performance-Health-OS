@@ -14,7 +14,7 @@ import jwt
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select, update
 from sqlalchemy.orm import Session
 
 from .config import Settings
@@ -89,19 +89,32 @@ def create_pairing_token(
 
 
 def consume_pairing_token(db: Session, *, token: str, requested_role: str) -> PairingTokenModel:
-    record = db.get(PairingTokenModel, _secret_hash(token))
+    token_hash = _secret_hash(token)
     now = datetime.now(UTC)
-    if record is None:
-        raise ValueError("pairing token not found")
-    if record.used_at is not None or _as_utc(record.expires_at) < now:
-        raise ValueError("pairing token expired or already used")
-    if record.role != requested_role:
-        raise ValueError("pairing token role does not match requested role")
-    issuer = active_device(db, record.issued_by_device_id)
-    if issuer is None or issuer.role != "owner_device":
-        raise ValueError("pairing token issuer is no longer an active owner")
-    record.used_at = now
-    db.flush()
+    active_owner_exists = exists(
+        select(DeviceModel.device_id).where(
+            DeviceModel.device_id == PairingTokenModel.issued_by_device_id,
+            DeviceModel.enabled.is_(True),
+            DeviceModel.role == "owner_device",
+        )
+    )
+    consumed_hash = db.scalar(
+        update(PairingTokenModel)
+        .where(
+            PairingTokenModel.token_hash == token_hash,
+            PairingTokenModel.used_at.is_(None),
+            PairingTokenModel.expires_at >= now,
+            PairingTokenModel.role == requested_role,
+            active_owner_exists,
+        )
+        .values(used_at=now)
+        .returning(PairingTokenModel.token_hash)
+    )
+    if consumed_hash is None:
+        raise ValueError("pairing token is invalid, expired, already used, role-mismatched, or issuer inactive")
+    record = db.get(PairingTokenModel, token_hash)
+    if record is None:  # pragma: no cover - guarded by successful atomic update
+        raise RuntimeError("pairing token disappeared after atomic consumption")
     return record
 
 
@@ -109,11 +122,24 @@ def create_challenge(db: Session, *, device_id: str, settings: Settings) -> Auth
     device = db.get(DeviceModel, device_id)
     if device is None or not device.enabled:
         raise ValueError("unknown or disabled device")
+    now = datetime.now(UTC)
+    reusable = db.scalar(
+        select(AuthChallengeModel)
+        .where(
+            AuthChallengeModel.device_id == device_id,
+            AuthChallengeModel.used_at.is_(None),
+            AuthChallengeModel.expires_at > now + timedelta(seconds=5),
+        )
+        .order_by(AuthChallengeModel.created_at.desc())
+        .limit(1)
+    )
+    if reusable is not None:
+        return reusable
     challenge = AuthChallengeModel(
         challenge_id=uuid4().hex,
         device_id=device_id,
         nonce=secrets.token_urlsafe(48),
-        expires_at=datetime.now(UTC) + timedelta(seconds=settings.challenge_ttl_seconds),
+        expires_at=now + timedelta(seconds=settings.challenge_ttl_seconds),
     )
     db.add(challenge)
     db.flush()
@@ -142,8 +168,30 @@ def verify_challenge(
         public_key.verify(signature, challenge.nonce.encode("utf-8"), ec.ECDSA(hashes.SHA256()))
     except InvalidSignature as exc:
         raise ValueError("invalid device signature") from exc
-    challenge.used_at = now
-    device.last_seen_at = now
+    active_device_exists = exists(
+        select(DeviceModel.device_id).where(
+            DeviceModel.device_id == AuthChallengeModel.device_id,
+            DeviceModel.enabled.is_(True),
+        )
+    )
+    consumed_id = db.scalar(
+        update(AuthChallengeModel)
+        .where(
+            AuthChallengeModel.challenge_id == challenge_id,
+            AuthChallengeModel.used_at.is_(None),
+            AuthChallengeModel.expires_at >= now,
+            active_device_exists,
+        )
+        .values(used_at=now)
+        .returning(AuthChallengeModel.challenge_id)
+    )
+    if consumed_id is None:
+        raise ValueError("challenge expired, already used, or device disabled")
+    db.execute(
+        update(DeviceModel)
+        .where(DeviceModel.device_id == device.device_id, DeviceModel.enabled.is_(True))
+        .values(last_seen_at=now)
+    )
     db.flush()
     return issue_access_token(device=device, settings=settings, now=now)
 
