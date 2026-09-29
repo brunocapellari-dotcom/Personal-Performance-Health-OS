@@ -31,6 +31,7 @@ from .entity_payloads import (
     CalendarAvailabilityPayload,
     EventPayload,
     GoalPayload,
+    NutritionEntryPayload,
     NutritionTrendPayload,
     PerformedSessionPayload,
     ReadinessPayload,
@@ -221,6 +222,24 @@ class PlanningStateResolver:
             hrv_delta_pct=hrv_delta_pct,
             pain_flag=payload.pain_flag,
         )
+
+    def nutrition_entries(
+        self,
+        db: Session,
+        *,
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> tuple[NutritionEntryPayload, ...]:
+        entries: list[NutritionEntryPayload] = []
+        for row in self._active(db, "nutrition_entry"):
+            payload = NutritionEntryPayload.model_validate(row.payload)
+            consumed = payload.consumed_at
+            if start is not None and consumed < start:
+                continue
+            if end is not None and consumed >= end:
+                continue
+            entries.append(payload)
+        return tuple(sorted(entries, key=lambda item: (item.consumed_at, item.entry_id)))
 
     def nutrition(self, db: Session) -> NutritionTrend | None:
         row = self._latest(db, "nutrition_trend")
