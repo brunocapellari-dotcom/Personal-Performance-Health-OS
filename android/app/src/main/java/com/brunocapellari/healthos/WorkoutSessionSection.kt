@@ -71,7 +71,7 @@ fun WorkoutSessionSection(
         mutableStateMapOf<String, WorkoutDraftExercise>().apply {
             val restoredByPlanned = restored?.exercises?.associateBy { it.plannedExerciseId }.orEmpty()
             plannedExercises.forEach { planned ->
-                val saved = restoredByPlanned[planned.exerciseId]
+                val saved = restoredByPlanned[planned.exerciseId]?.takeIf { it.sets.isNotEmpty() }
                 put(
                     planned.exerciseId,
                     saved ?: WorkoutDraftExercise(
