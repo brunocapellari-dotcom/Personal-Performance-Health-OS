@@ -393,6 +393,8 @@ class PlanningStateResolver:
                     sets=tuple(
                         PerformedSet(
                             set_number=item.set_number,
+                            completed=item.completed,
+                            completed_at=item.completed_at,
                             reps=item.reps,
                             load_kg=item.load_kg,
                             rir=item.rir,
