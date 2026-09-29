@@ -296,6 +296,8 @@ class Observation:
 @dataclass(frozen=True)
 class PerformedSet:
     set_number: int
+    completed: bool = True
+    completed_at: datetime | None = None
     reps: int | None = None
     load_kg: float | None = None
     rir: float | None = None
