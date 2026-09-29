@@ -7,7 +7,11 @@ from typing import Any
 from .domain import Goal, PerformedSession, ReadinessInput
 from .engines import ReadinessEngine
 from .observation_pipeline import ObservationPipelineResult
-from .training_metrics import BodyMeasurementTrendEngine, WeeklyTrainingLoadEngine
+from .training_metrics import (
+    BodyMeasurementTrendEngine,
+    WeeklyTrainingLoadEngine,
+    WorkoutReconciliationEngine,
+)
 
 
 @dataclass(frozen=True)
@@ -28,6 +32,7 @@ class DashboardSnapshot:
     recovery: dict[str, Any]
     activity: dict[str, Any]
     body: dict[str, Any]
+    reconciliation: dict[str, Any]
     goals: tuple[DashboardGoalProgress, ...]
     alerts: tuple[str, ...]
 
@@ -80,7 +85,7 @@ class DashboardEngine:
             today,
         )
 
-        weights = ()
+        weights: tuple[tuple[Any, float], ...] = ()
         if observations is not None:
             weights = tuple(
                 (item.observed_at, float(item.value))
@@ -108,6 +113,26 @@ class DashboardEngine:
                 "latest_weight_at": trend.latest_at,
             }
 
+        reconciliation: dict[str, Any] = {
+            "matches": [],
+            "match_count": 0,
+            "unmatched_performed_session_ids": [],
+            "unmatched_observation_ids": [],
+            "evidence_kind": "INFERRED",
+        }
+        if observations is not None:
+            reconciled = WorkoutReconciliationEngine().reconcile(
+                performed_sessions,
+                observations.canonical,
+            )
+            reconciliation = {
+                "matches": [asdict(item) for item in reconciled.matches],
+                "match_count": len(reconciled.matches),
+                "unmatched_performed_session_ids": list(reconciled.unmatched_performed_session_ids),
+                "unmatched_observation_ids": list(reconciled.unmatched_observation_ids),
+                "evidence_kind": "INFERRED",
+            }
+
         training = self._training_summary(plan_json, today)
         if training["session_id"] is None:
             alerts.append("No current planned session is available.")
@@ -118,6 +143,7 @@ class DashboardEngine:
             recovery=recovery,
             activity=activity,
             body=body,
+            reconciliation=reconciliation,
             goals=tuple(self._goal_progress(goal) for goal in goals),
             alerts=tuple(dict.fromkeys(alerts)),
         )
