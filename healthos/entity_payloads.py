@@ -97,6 +97,8 @@ class CalendarAvailabilityPayload(EntityPayload):
 
 class PerformedSetPayload(EntityPayload):
     set_number: int = Field(ge=1, le=100)
+    completed: bool = True
+    completed_at: datetime | None = None
     reps: int | None = Field(default=None, ge=0, le=10000)
     load_kg: float | None = Field(default=None, ge=0, le=5000)
     rir: float | None = Field(default=None, ge=0, le=10)
