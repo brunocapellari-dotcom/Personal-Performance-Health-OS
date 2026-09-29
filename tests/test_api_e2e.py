@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from fastapi.testclient import TestClient
 
 from healthos.api import create_app
@@ -426,6 +427,9 @@ def test_api_responses_are_non_cacheable_and_request_id_is_bounded() -> None:
     assert response.headers["pragma"] == "no-cache"
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["referrer-policy"] == "no-referrer"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["cross-origin-resource-policy"] == "same-origin"
+    assert response.headers["permissions-policy"] == "camera=(), microphone=(), geolocation=()"
 
     invalid = client.get("/healthz", headers={"X-Request-ID": "bad id with spaces"})
     generated = invalid.headers["x-request-id"]
@@ -520,3 +524,42 @@ def test_daily_dashboard_is_authenticated_and_uses_canonical_state() -> None:
     assert payload["activity"]["sessions"] == 1
     assert payload["body"]["latest_weight_kg"] == 99.0
     assert payload["goals"][0]["current"] == 99.0
+
+
+
+def test_api_rejects_oversized_body_before_model_parsing() -> None:
+    settings = Settings(
+        environment="test",
+        database_url="sqlite+pysqlite:///:memory:",
+        jwt_secret="j" * 40,
+        audit_hmac_key="a" * 40,
+        test_bearer_token="test-token-strong-enough-for-ci",
+        max_request_body_bytes=65536,
+    )
+    client = TestClient(create_app(settings, initialize_schema=True))
+    response = client.post(
+        "/v1/sync/push",
+        headers={**_headers(), "Content-Type": "application/json"},
+        content="x" * 70000,
+    )
+    assert response.status_code == 413
+    assert response.json()["detail"] == "request body exceeds configured limit"
+
+
+def test_production_api_adds_transport_and_browser_hardening_headers() -> None:
+    key_one = base64.urlsafe_b64encode(b"k" * 32).decode("ascii")
+    key_two = base64.urlsafe_b64encode(b"q" * 32).decode("ascii")
+    settings = Settings(
+        environment="production",
+        database_url="postgresql+psycopg://healthos:unused@127.0.0.1:65432/healthos",
+        bootstrap_token="b" * 40,
+        jwt_secret="j" * 40,
+        audit_hmac_key="a" * 40,
+        blob_encryption_key_b64=key_one,
+        backup_encryption_key_b64=key_two,
+    )
+    client = TestClient(create_app(settings))
+    response = client.get("/healthz")
+    assert response.status_code == 200
+    assert response.headers["strict-transport-security"] == "max-age=31536000"
+    assert response.headers["content-security-policy"] == "default-src 'none'; frame-ancestors 'none'"
