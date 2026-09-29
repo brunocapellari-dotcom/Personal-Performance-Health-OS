@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
-from datetime import UTC, date, datetime
 import logging
 import re
 import time
+from collections.abc import Iterator
 from dataclasses import asdict
+from datetime import UTC, date, datetime
 from typing import Annotated
 from uuid import uuid4
 
@@ -332,7 +332,10 @@ def create_app(
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="nutrition source unavailable") from exc
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="nutrition source returned invalid data") from exc
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="nutrition source returned invalid data",
+            ) from exc
         return NutritionSearchResponse(foods=[FoodRecordOut.model_validate(asdict(food)) for food in foods])
 
     @app.get("/v1/nutrition/barcode/{barcode}", response_model=FoodRecordOut)
@@ -341,7 +344,10 @@ def create_app(
         try:
             food = resolved_packaged_provider.lookup_barcode(barcode)
         except httpx.HTTPError as exc:
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="packaged food source unavailable") from exc
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="packaged food source unavailable",
+            ) from exc
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
         if food is None:
@@ -548,7 +554,7 @@ def create_app(
             performed_sessions=resolver.performed_sessions(db),
             plan_json=None if latest_plan is None else dict(latest_plan.plan_json),
         )
-        return jsonable_encoder(asdict(result))
+        return asdict(result)
 
     @app.get("/v1/observations/timeline")
     def observations_timeline(
