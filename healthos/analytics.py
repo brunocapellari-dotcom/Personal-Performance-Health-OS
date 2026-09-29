@@ -160,11 +160,12 @@ class StrengthHistoryEngine:
                 continue
             when = self._utc_time(session.performed_at)
             for exercise in session.exercises:
-                if exercise.exercise_id not in targets or not exercise.sets:
+                completed_sets = tuple(item for item in exercise.sets if item.completed)
+                if exercise.exercise_id not in targets or not completed_sets:
                     continue
                 current = latest.get(exercise.exercise_id)
                 if current is None or when >= current[0]:
-                    latest[exercise.exercise_id] = (when, exercise.sets)
+                    latest[exercise.exercise_id] = (when, completed_sets)
 
         available = tuple(sorted(set(load_options_kg)))
         output: dict[str, StrengthProgression] = {}
