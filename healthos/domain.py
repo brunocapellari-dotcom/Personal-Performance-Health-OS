@@ -36,6 +36,19 @@ class EvidenceKind(StrEnum):
     HYPOTHESIS = "HYPOTHESIS"
 
 
+class SetType(StrEnum):
+    WARM_UP = "warm_up"
+    WORKING = "working"
+    BACK_OFF = "back_off"
+    DROP = "drop"
+    AMRAP = "amrap"
+
+
+class ExerciseGroupType(StrEnum):
+    SUPERSET = "superset"
+    CIRCUIT = "circuit"
+
+
 @dataclass(frozen=True)
 class Goal:
     goal_id: str
@@ -175,6 +188,9 @@ class ExercisePrescription:
     distance_m: float | None = None
     rest_seconds: int | None = None
     tempo: str | None = None
+    set_type: SetType = SetType.WORKING
+    group_type: ExerciseGroupType | None = None
+    group_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -285,12 +301,15 @@ class PerformedSet:
     rpe: float | None = None
     duration_seconds: int | None = None
     distance_m: float | None = None
+    set_type: SetType = SetType.WORKING
 
 
 @dataclass(frozen=True)
 class PerformedExercise:
     exercise_id: str
     sets: tuple[PerformedSet, ...]
+    group_type: ExerciseGroupType | None = None
+    group_id: str | None = None
 
 
 @dataclass(frozen=True)
