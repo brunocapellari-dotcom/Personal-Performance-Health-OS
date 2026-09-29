@@ -431,3 +431,92 @@ def test_api_responses_are_non_cacheable_and_request_id_is_bounded() -> None:
     generated = invalid.headers["x-request-id"]
     assert generated != "bad id with spaces"
     assert len(generated) == 32
+
+
+
+def test_daily_dashboard_is_authenticated_and_uses_canonical_state() -> None:
+    client = _client()
+    seed = {
+        "changes": [
+            {
+                "change_id": "dashboard-goal-1",
+                "entity_type": "goal",
+                "entity_id": "dashboard-weight",
+                "logical_clock": 1,
+                "payload": {
+                    "goal_id": "dashboard-weight",
+                    "description": "Synthetic weight target",
+                    "priority": 5,
+                    "baseline": 100.0,
+                    "target": 90.0,
+                    "metric": "weight_kg",
+                    "constraints": [],
+                },
+            },
+            {
+                "change_id": "dashboard-ready-1",
+                "entity_type": "readiness",
+                "entity_id": "dashboard-ready",
+                "logical_clock": 2,
+                "payload": {
+                    "observed_at": "2026-09-29T07:00:00Z",
+                    "sleep_hours": 7.5,
+                    "sleep_quality_1_5": 4,
+                    "energy_1_5": 4,
+                    "fatigue_1_5": 2,
+                    "soreness_1_5": 2,
+                    "stress_1_5": 2,
+                    "pain_flag": False,
+                },
+            },
+            {
+                "change_id": "dashboard-weight-1",
+                "entity_type": "observation",
+                "entity_id": "dashboard-weight-observation",
+                "logical_clock": 3,
+                "payload": {
+                    "record_type": "weight",
+                    "source_record_id": "dashboard-weight-source",
+                    "observed_at_epoch_ms": 1790672400000,
+                    "data_origin_package": "com.synthetic.scale",
+                    "last_modified_at_epoch_ms": 1790672400000,
+                    "client_record_version": 1,
+                    "recording_method": 2,
+                    "health_connect_deleted": False,
+                    "data": {
+                        "kilograms": 99.0,
+                        "time": "2026-09-29T09:00:00Z",
+                    },
+                },
+            },
+            {
+                "change_id": "dashboard-session-1",
+                "entity_type": "performed_session",
+                "entity_id": "dashboard-performed",
+                "logical_clock": 4,
+                "payload": {
+                    "planned_session_id": "dashboard-plan-session",
+                    "performed_at": "2026-09-29T10:00:00Z",
+                    "completed": True,
+                    "duration_minutes": 30,
+                    "rpe": 7.0,
+                    "notes": "",
+                    "exercises": [],
+                },
+            },
+        ]
+    }
+    pushed = client.post("/v1/sync/push", headers=_headers(), json=seed)
+    assert pushed.status_code == 200, pushed.text
+
+    unauthenticated = client.get("/v1/dashboard?today=2026-09-29")
+    assert unauthenticated.status_code == 401
+
+    response = client.get("/v1/dashboard?today=2026-09-29", headers=_headers())
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["today"] == "2026-09-29"
+    assert payload["recovery"]["readiness_score"] is not None
+    assert payload["activity"]["sessions"] == 1
+    assert payload["body"]["latest_weight_kg"] == 99.0
+    assert payload["goals"][0]["current"] == 99.0
