@@ -109,6 +109,11 @@ class HealthDataRepository(
         return api.searchFoods(token, normalized)
     }
 
+    suspend fun loadDashboard(today: LocalDate): JSONObject {
+        val token = api.authenticate(identity)
+        return api.dashboard(token, today.toString())
+    }
+
     suspend fun fullSync(mode: HealthIngestionMode = HealthIngestionMode.FOREGROUND): SyncSummary {
         val hasAnyRead = healthConnect.hasAnyReadPermission()
         val backgroundAllowed = mode != HealthIngestionMode.BACKGROUND || healthConnect.hasBackgroundReadPermission()
