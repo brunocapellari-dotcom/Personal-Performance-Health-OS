@@ -207,3 +207,27 @@ def test_workout_reconciliation_does_not_force_distant_records() -> None:
 def test_workout_reconciliation_rejects_invalid_tolerance() -> None:
     with pytest.raises(ValueError):
         WorkoutReconciliationEngine().reconcile((), (), end_tolerance_minutes=0)
+
+
+
+def test_incomplete_sets_are_excluded_from_volume_and_records() -> None:
+    session = PerformedSession(
+        planned_session_id="partial",
+        completed=False,
+        duration_minutes=20,
+        rpe=6,
+        performed_at=datetime(2026, 9, 29, 8, tzinfo=UTC),
+        exercises=(
+            PerformedExercise(
+                "squat",
+                (
+                    PerformedSet(set_number=1, completed=True, reps=10, load_kg=40),
+                    PerformedSet(set_number=2, completed=False, reps=100, load_kg=500),
+                ),
+            ),
+        ),
+    )
+    result = SessionMetricsEngine().summarize(session)
+    assert result.completed_sets == 1
+    assert result.total_reps == 10
+    assert result.volume_load_kg == 400.0
