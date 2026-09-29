@@ -388,6 +388,8 @@ class PlanningStateResolver:
             exercises = tuple(
                 PerformedExercise(
                     exercise_id=exercise.exercise_id,
+                    planned_exercise_id=exercise.planned_exercise_id,
+                    substitution_reason=exercise.substitution_reason,
                     sets=tuple(
                         PerformedSet(
                             set_number=item.set_number,
