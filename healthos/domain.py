@@ -191,6 +191,7 @@ class ExercisePrescription:
     set_type: SetType = SetType.WORKING
     group_type: ExerciseGroupType | None = None
     group_id: str | None = None
+    alternatives: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -308,6 +309,8 @@ class PerformedSet:
 class PerformedExercise:
     exercise_id: str
     sets: tuple[PerformedSet, ...]
+    planned_exercise_id: str | None = None
+    substitution_reason: str | None = None
     group_type: ExerciseGroupType | None = None
     group_id: str | None = None
 
