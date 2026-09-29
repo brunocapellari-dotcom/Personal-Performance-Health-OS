@@ -23,7 +23,14 @@ def test_performed_session_payload_accepts_advanced_set_structures() -> None:
                     "group_id": "A",
                     "sets": [
                         {"set_number": 1, "reps": 10, "load_kg": 40, "set_type": "warm_up"},
-                        {"set_number": 2, "reps": 8, "load_kg": 60, "set_type": "working"},
+                        {
+                            "set_number": 2,
+                            "completed": True,
+                            "completed_at": "2026-09-29T12:01:00Z",
+                            "reps": 8,
+                            "load_kg": 60,
+                            "set_type": "working",
+                        },
                         {"set_number": 3, "reps": 12, "load_kg": 40, "set_type": "drop"},
                         {"set_number": 4, "reps": 15, "load_kg": 30, "set_type": "amrap"},
                     ],
@@ -33,6 +40,8 @@ def test_performed_session_payload_accepts_advanced_set_structures() -> None:
     )
     assert payload.exercises[0].group_type == "superset"
     assert payload.exercises[0].group_id == "A"
+    assert payload.exercises[0].sets[1].completed is True
+    assert payload.exercises[0].sets[1].completed_at is not None
     assert [item.set_type for item in payload.exercises[0].sets] == [
         "warm_up",
         "working",
