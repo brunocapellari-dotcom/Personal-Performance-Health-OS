@@ -114,6 +114,72 @@ class HealthDataRepository(
         return api.dashboard(token, today.toString())
     }
 
+    suspend fun recordNutritionEntry(
+        food: JSONObject,
+        quantityG: Double,
+        meal: String,
+    ): String {
+        require(quantityG > 0.0 && quantityG <= 10000.0) { "quantity must be between 0 and 10000 g" }
+        val cleanMeal = meal.trim().replace(Regex("\\s+"), " ")
+        require(cleanMeal.length in 1..64) { "meal must contain 1 to 64 characters" }
+        val foodId = food.optString("food_id").trim()
+        val foodName = food.optString("name").trim()
+        val source = food.optString("source").trim()
+        require(foodId.isNotBlank() && foodName.isNotBlank() && source.isNotBlank()) {
+            "food record is missing canonical identity or provenance"
+        }
+
+        val factor = quantityG / 100.0
+        fun scaled(key: String): Double? =
+            if (!food.has(key) || food.isNull(key)) null else food.getDouble(key) * factor
+
+        val micronutrients = JSONObject()
+        val rawMicros = food.optJSONObject("micronutrients") ?: JSONObject()
+        val keys = rawMicros.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            val value = rawMicros.optDouble(key, Double.NaN)
+            if (value.isFinite() && value >= 0.0) micronutrients.put(key, value * factor)
+        }
+        val fiberG = sequence {
+            val micronutrientKeys = micronutrients.keys()
+            while (micronutrientKeys.hasNext()) yield(micronutrientKeys.next())
+        }
+            .firstOrNull { key -> key.lowercase().contains("fiber") }
+            ?.let { key -> micronutrients.optDouble(key, Double.NaN) }
+            ?.takeIf(Double::isFinite)
+
+        val entryId = UUID.randomUUID().toString()
+        val now = Instant.now()
+        val payload = JSONObject()
+            .put("entry_id", entryId)
+            .put("consumed_at", now.toString())
+            .put("meal", cleanMeal)
+            .put("food_id", foodId)
+            .put("food_name", foodName)
+            .put("quantity_g", quantityG)
+            .put("source", source)
+            .put("source_version", food.optNullable("source_version"))
+            .put("source_record_id", food.optNullable("source_record_id"))
+            .put("source_quality", food.optNullable("source_quality"))
+            .put("license_id", food.optNullable("license_id"))
+            .put("raw_hash", food.optNullable("raw_hash"))
+            .put("energy_kcal", scaled("energy_kcal_per_100g") ?: JSONObject.NULL)
+            .put("protein_g", scaled("protein_g_per_100g") ?: JSONObject.NULL)
+            .put("carbohydrate_g", scaled("carbohydrate_g_per_100g") ?: JSONObject.NULL)
+            .put("fat_g", scaled("fat_g_per_100g") ?: JSONObject.NULL)
+            .put("fiber_g", fiberG ?: JSONObject.NULL)
+            .put("micronutrients", micronutrients)
+
+        stageEntity(
+            entityType = "nutrition_entry",
+            entityId = entryId,
+            payload = payload,
+            logicalClock = now.toEpochMilli().coerceAtLeast(1),
+        )
+        return entryId
+    }
+
     suspend fun fullSync(mode: HealthIngestionMode = HealthIngestionMode.FOREGROUND): SyncSummary {
         val hasAnyRead = healthConnect.hasAnyReadPermission()
         val backgroundAllowed = mode != HealthIngestionMode.BACKGROUND || healthConnect.hasBackgroundReadPermission()
@@ -522,6 +588,9 @@ class HealthDataRepository(
     private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray(Charsets.UTF_8))
         .joinToString("") { "%02x".format(it) }
+
+    private fun JSONObject.optNullable(key: String): Any =
+        if (!has(key) || isNull(key)) JSONObject.NULL else get(key)
 
     private fun JSONArray.toStringList(): List<String> = List(length()) { index -> getString(index) }
 }
