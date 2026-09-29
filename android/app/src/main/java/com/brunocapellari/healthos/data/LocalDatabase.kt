@@ -95,9 +95,6 @@ interface SyncStateDao {
     @Query("SELECT * FROM sync_state WHERE `key` = :key LIMIT 1")
     suspend fun get(key: String): SyncStateEntity?
 
-    @Query("SELECT * FROM sync_state WHERE `key` LIKE :prefix || '%' ORDER BY updatedAtEpochMillis DESC LIMIT 1")
-    suspend fun latestByPrefix(prefix: String): SyncStateEntity?
-
     @Upsert
     suspend fun upsert(state: SyncStateEntity)
 
