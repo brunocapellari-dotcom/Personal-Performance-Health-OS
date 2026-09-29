@@ -114,6 +114,17 @@ class HealthDataRepository(
         return api.dashboard(token, today.toString())
     }
 
+    suspend fun loadTrainingHistory(days: Int, today: LocalDate): JSONObject {
+        val token = api.authenticate(identity)
+        return api.trainingHistory(token, days, today.toString())
+    }
+
+    suspend fun loadNutritionHistory(start: LocalDate, end: LocalDate): JSONObject {
+        require(!end.isBefore(start)) { "nutrition history end must not precede start" }
+        val token = api.authenticate(identity)
+        return api.nutritionHistory(token, start.toString(), end.toString())
+    }
+
     suspend fun recordNutritionEntry(
         food: JSONObject,
         quantityG: Double,
