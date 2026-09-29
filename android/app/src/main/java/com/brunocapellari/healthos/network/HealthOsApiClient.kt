@@ -74,6 +74,23 @@ class HealthOsApiClient(
         bearer = token,
     )
 
+    fun trainingHistory(token: String, days: Int, today: String): JSONObject {
+        require(days in 7..3660) { "history days must be between 7 and 3660" }
+        val url = (root + "/v1/training/history").toHttpUrl().newBuilder()
+            .addQueryParameter("days", days.toString())
+            .addQueryParameter("today", today)
+            .build()
+        return get(url, token)
+    }
+
+    fun nutritionHistory(token: String, start: String, end: String): JSONObject {
+        val url = (root + "/v1/nutrition/history").toHttpUrl().newBuilder()
+            .addQueryParameter("start", start)
+            .addQueryParameter("end", end)
+            .build()
+        return get(url, token)
+    }
+
     fun lookupFoodBarcode(token: String, barcode: String): JSONObject {
         require(barcode.matches(Regex("^\\d{4,24}$"))) { "barcode must contain 4 to 24 digits" }
         return get(path = "/v1/nutrition/barcode/$barcode", bearer = token)
@@ -102,9 +119,11 @@ class HealthOsApiClient(
         return execute(builder.build())
     }
 
-    private fun get(path: String, bearer: String): JSONObject {
+    private fun get(path: String, bearer: String): JSONObject = get((root + path).toHttpUrl(), bearer)
+
+    private fun get(url: okhttp3.HttpUrl, bearer: String): JSONObject {
         val request = Request.Builder()
-            .url(root + path)
+            .url(url)
             .header("Authorization", "Bearer $bearer")
             .get()
             .build()
