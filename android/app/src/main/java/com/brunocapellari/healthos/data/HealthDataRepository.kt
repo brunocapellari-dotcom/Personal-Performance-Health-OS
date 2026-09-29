@@ -137,6 +137,31 @@ class HealthDataRepository(
 
     suspend fun conflictCount(): Int = database.syncConflictDao().count()
 
+    suspend fun saveWorkoutDraft(draft: WorkoutDraft) {
+        require(draft.sessionId.isNotBlank()) { "workout draft sessionId is required" }
+        require(draft.duration.length <= 4 && draft.duration.all(Char::isDigit)) { "invalid workout draft duration" }
+        require(draft.rpe.length <= 4) { "invalid workout draft RPE" }
+        require(draft.notes.length <= 5000) { "workout draft notes exceed 5000 characters" }
+        database.syncStateDao().upsert(
+            SyncStateEntity(
+                key = "workout_draft:${draft.sessionId}",
+                value = draft.toJson(),
+                updatedAtEpochMillis = draft.updatedAtEpochMillis,
+            ),
+        )
+    }
+
+    suspend fun loadLatestWorkoutDraft(): WorkoutDraft? =
+        database.syncStateDao()
+            .latestByPrefix("workout_draft:")
+            ?.value
+            ?.let(WorkoutDraft::fromJson)
+
+    suspend fun clearWorkoutDraft(sessionId: String) {
+        require(sessionId.isNotBlank()) { "sessionId is required" }
+        database.syncStateDao().delete("workout_draft:$sessionId")
+    }
+
     suspend fun saveInitialSetup(
         goalDescription: String,
         goalMetric: String,
