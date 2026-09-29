@@ -63,6 +63,7 @@ class MainActivity : ComponentActivity() {
     private val activeExercises = mutableStateOf<List<PlannedExerciseUi>>(emptyList())
     private val pairingTokenText = mutableStateOf("")
     private val nutritionText = mutableStateOf("")
+    private val nutritionFoods = mutableStateOf<List<JSONObject>>(emptyList())
     private val dashboardText = mutableStateOf("Resumo diário ainda não carregado")
     private val workoutDraft = mutableStateOf<WorkoutDraft?>(null)
 
@@ -116,10 +117,12 @@ class MainActivity : ComponentActivity() {
                             onSync = ::syncNow,
                             onSaveInitialSetup = ::saveInitialSetup,
                             nutritionResult = nutritionText.value,
+                            nutritionFoods = nutritionFoods.value,
                             dashboardResult = dashboardText.value,
                             onRefreshDashboard = ::refreshDashboard,
                             onLookupBarcode = ::lookupFoodBarcode,
                             onSearchFoods = ::searchFoods,
+                            onLogFood = ::logFood,
                             activeSessionId = activeSessionId.value,
                             plannedExercises = activeExercises.value,
                             initialDraft = workoutDraft.value,
@@ -239,8 +242,10 @@ class MainActivity : ComponentActivity() {
             runCatching {
                 withContext(Dispatchers.IO) { container.repository.lookupFoodBarcode(barcode) }
             }.onSuccess { food ->
+                nutritionFoods.value = listOf(food)
                 nutritionText.value = formatFood(food)
             }.onFailure {
+                nutritionFoods.value = emptyList()
                 nutritionText.value = "Produto não encontrado ou fonte indisponível: ${it.message ?: "erro desconhecido"}"
             }
         }
@@ -253,6 +258,7 @@ class MainActivity : ComponentActivity() {
                 withContext(Dispatchers.IO) { container.repository.searchFoods(query) }
             }.onSuccess { response ->
                 val foods = response.optJSONArray("foods") ?: JSONArray()
+                nutritionFoods.value = List(minOf(foods.length(), 8)) { index -> foods.getJSONObject(index) }
                 nutritionText.value = if (foods.length() == 0) {
                     "Nenhum alimento encontrado."
                 } else {
@@ -265,7 +271,25 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }.onFailure {
+                nutritionFoods.value = emptyList()
                 nutritionText.value = "Busca de alimentos indisponível: ${it.message ?: "erro desconhecido"}"
+            }
+        }
+    }
+
+    private fun logFood(food: JSONObject, quantityG: Double, meal: String) {
+        lifecycleScope.launch {
+            statusText.value = "Registrando alimento consumido"
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    container.repository.recordNutritionEntry(food, quantityG, meal)
+                    container.repository.fullSync()
+                }
+            }.onSuccess {
+                statusText.value = "Alimento registrado e sincronizado"
+                refreshDashboard()
+            }.onFailure {
+                statusText.value = "Falha ao registrar alimento: ${it.message ?: "erro desconhecido"}"
             }
         }
     }
@@ -530,10 +554,12 @@ private fun Dashboard(
     onSync: () -> Unit,
     onSaveInitialSetup: (InitialSetupInput) -> Unit,
     nutritionResult: String,
+    nutritionFoods: List<JSONObject>,
     dashboardResult: String,
     onRefreshDashboard: () -> Unit,
     onLookupBarcode: (String) -> Unit,
     onSearchFoods: (String) -> Unit,
+    onLogFood: (JSONObject, Double, String) -> Unit,
     onNextBlock: () -> Unit,
     onSaveWorkoutDraft: (WorkoutDraft) -> Unit,
     onRecordSession: (String, Boolean, Int, Double?, String, JSONArray) -> Unit,
@@ -598,8 +624,10 @@ private fun Dashboard(
         InitialSetupSection(onSave = onSaveInitialSetup)
         NutritionBarcodeSection(
             resultText = nutritionResult,
+            foods = nutritionFoods,
             onLookupBarcode = onLookupBarcode,
             onSearchFoods = onSearchFoods,
+            onLogFood = onLogFood,
         )
         Button(onClick = onNextBlock, modifier = Modifier.fillMaxWidth()) {
             Text("Monta meu próximo bloco")
