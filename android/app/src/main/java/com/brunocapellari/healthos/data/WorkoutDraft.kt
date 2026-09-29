@@ -4,6 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 data class WorkoutDraftExercise(
+    val plannedExerciseId: String,
     val exerciseId: String,
     val plannedSets: Int,
     val suggestedLoadKg: Double?,
@@ -12,6 +13,8 @@ data class WorkoutDraftExercise(
     val setType: String = "working",
     val groupType: String? = null,
     val groupId: String? = null,
+    val alternatives: List<String> = emptyList(),
+    val substitutionReason: String? = null,
     val loadKg: String = "",
     val repsCsv: String = "",
     val rirCsv: String = "",
@@ -31,6 +34,7 @@ data class WorkoutDraft(
         exercises.forEach { exercise ->
             exerciseArray.put(
                 JSONObject()
+                    .put("planned_exercise_id", exercise.plannedExerciseId)
                     .put("exercise_id", exercise.exerciseId)
                     .put("planned_sets", exercise.plannedSets)
                     .put("suggested_load_kg", exercise.suggestedLoadKg ?: JSONObject.NULL)
@@ -39,6 +43,8 @@ data class WorkoutDraft(
                     .put("set_type", exercise.setType)
                     .put("group_type", exercise.groupType ?: JSONObject.NULL)
                     .put("group_id", exercise.groupId ?: JSONObject.NULL)
+                    .put("alternatives", JSONArray(exercise.alternatives))
+                    .put("substitution_reason", exercise.substitutionReason ?: JSONObject.NULL)
                     .put("load_kg", exercise.loadKg)
                     .put("reps_csv", exercise.repsCsv)
                     .put("rir_csv", exercise.rirCsv),
@@ -62,9 +68,12 @@ data class WorkoutDraft(
             val exercises = buildList {
                 for (index in 0 until exerciseArray.length()) {
                     val exercise = exerciseArray.getJSONObject(index)
+                    val currentExerciseId = exercise.getString("exercise_id")
+                    val alternatives = exercise.optJSONArray("alternatives") ?: JSONArray()
                     add(
                         WorkoutDraftExercise(
-                            exerciseId = exercise.getString("exercise_id"),
+                            plannedExerciseId = exercise.optString("planned_exercise_id", currentExerciseId),
+                            exerciseId = currentExerciseId,
                             plannedSets = exercise.getInt("planned_sets"),
                             suggestedLoadKg = if (exercise.isNull("suggested_load_kg")) {
                                 null
@@ -80,6 +89,8 @@ data class WorkoutDraft(
                             setType = exercise.optString("set_type", "working"),
                             groupType = exercise.optString("group_type").takeIf(String::isNotBlank),
                             groupId = exercise.optString("group_id").takeIf(String::isNotBlank),
+                            alternatives = List(alternatives.length()) { index -> alternatives.getString(index) },
+                            substitutionReason = exercise.optString("substitution_reason").takeIf(String::isNotBlank),
                             loadKg = exercise.optString("load_kg", ""),
                             repsCsv = exercise.optString("reps_csv", ""),
                             rirCsv = exercise.optString("rir_csv", ""),
