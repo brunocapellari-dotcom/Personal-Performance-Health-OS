@@ -97,17 +97,24 @@ class CalendarAvailabilityPayload(EntityPayload):
 
 class PerformedSetPayload(EntityPayload):
     set_number: int = Field(ge=1, le=100)
+    completed: bool = True
+    completed_at: datetime | None = None
     reps: int | None = Field(default=None, ge=0, le=10000)
     load_kg: float | None = Field(default=None, ge=0, le=5000)
     rir: float | None = Field(default=None, ge=0, le=10)
     rpe: float | None = Field(default=None, ge=0, le=10)
     duration_seconds: int | None = Field(default=None, ge=0, le=86400)
     distance_m: float | None = Field(default=None, ge=0, le=1000000)
+    set_type: Literal["warm_up", "working", "back_off", "drop", "amrap"] = "working"
 
 
 class PerformedExercisePayload(EntityPayload):
     exercise_id: str = Field(min_length=1, max_length=128)
+    planned_exercise_id: str | None = Field(default=None, min_length=1, max_length=128)
+    substitution_reason: str | None = Field(default=None, min_length=1, max_length=500)
     sets: list[PerformedSetPayload] = Field(default_factory=list, max_length=100)
+    group_type: Literal["superset", "circuit"] | None = None
+    group_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class PerformedSessionPayload(EntityPayload):
@@ -119,6 +126,10 @@ class PerformedSessionPayload(EntityPayload):
     avg_hr_bpm: float | None = Field(default=None, ge=20, le=300)
     max_hr_bpm: float | None = Field(default=None, ge=20, le=300)
     distance_m: float | None = Field(default=None, ge=0, le=1000000)
+    modality: str | None = Field(default=None, min_length=1, max_length=64)
+    avg_power_w: float | None = Field(default=None, ge=0, le=5000)
+    avg_cadence_rpm: float | None = Field(default=None, ge=0, le=300)
+    interval_structure: str | None = Field(default=None, max_length=1000)
     notes: str = Field(default="", max_length=5000)
     exercises: list[PerformedExercisePayload] = Field(default_factory=list, max_length=100)
 
@@ -162,6 +173,51 @@ class SupplementEventPayload(EntityPayload):
     observed_at: datetime
     action: Literal["taken", "missed", "note", "effect", "interaction_flag"]
     notes: str = Field(default="", max_length=5000)
+
+
+class NutritionEntryPayload(EntityPayload):
+    entry_id: str = Field(min_length=1, max_length=128)
+    consumed_at: datetime
+    meal: str = Field(min_length=1, max_length=64)
+    food_id: str = Field(min_length=1, max_length=256)
+    food_name: str = Field(min_length=1, max_length=512)
+    quantity_g: float = Field(gt=0, le=10000)
+    source: str = Field(min_length=1, max_length=128)
+    source_version: str | None = Field(default=None, max_length=256)
+    source_record_id: str | None = Field(default=None, max_length=256)
+    source_quality: str | None = Field(default=None, max_length=256)
+    license_id: str | None = Field(default=None, max_length=128)
+    raw_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    energy_kcal: float | None = Field(default=None, ge=0, le=100000)
+    protein_g: float | None = Field(default=None, ge=0, le=10000)
+    carbohydrate_g: float | None = Field(default=None, ge=0, le=10000)
+    fat_g: float | None = Field(default=None, ge=0, le=10000)
+    fiber_g: float | None = Field(default=None, ge=0, le=10000)
+    hydration_l: float | None = Field(default=None, ge=0, le=100)
+    micronutrients: dict[str, float] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_micronutrients(self) -> "NutritionEntryPayload":
+        if len(self.micronutrients) > 200:
+            raise ValueError("micronutrient map cannot exceed 200 entries")
+        if any(len(key) > 256 or not key.strip() for key in self.micronutrients):
+            raise ValueError("micronutrient names must be non-empty and at most 256 characters")
+        if any(value < 0 or value > 1_000_000 for value in self.micronutrients.values()):
+            raise ValueError("micronutrient values are outside accepted bounds")
+        return self
+
+
+class MealTemplateItemPayload(EntityPayload):
+    food_id: str = Field(min_length=1, max_length=256)
+    food_name: str = Field(min_length=1, max_length=512)
+    quantity_g: float = Field(gt=0, le=10000)
+
+
+class MealTemplatePayload(EntityPayload):
+    template_id: str = Field(min_length=1, max_length=128)
+    name: str = Field(min_length=1, max_length=128)
+    meal: str = Field(min_length=1, max_length=64)
+    items: list[MealTemplateItemPayload] = Field(min_length=1, max_length=50)
 
 
 class BodyMeasurementPayload(EntityPayload):
@@ -229,6 +285,8 @@ ENTITY_MODELS: dict[str, type[EntityPayload]] = {
     "checkin": CheckinPayload,
     "medication_event": MedicationEventPayload,
     "supplement_event": SupplementEventPayload,
+    "nutrition_entry": NutritionEntryPayload,
+    "meal_template": MealTemplatePayload,
     "body_measurement": BodyMeasurementPayload,
     "health_source_priority": HealthSourcePriorityPayload,
     "metric_expectation": MetricExpectationPayload,
@@ -262,6 +320,8 @@ def validate_entity_payload(entity_type: str, entity_id: str, payload: dict[str,
         "goal": "goal_id",
         "event": "event_id",
         "assessment_result": "assessment_id",
+        "nutrition_entry": "entry_id",
+        "meal_template": "template_id",
     }
     id_field = id_field_by_type.get(entity_type)
     if id_field is not None and str(normalized[id_field]) != entity_id:

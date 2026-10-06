@@ -68,6 +68,24 @@ class HealthOsApiClientTest {
 
 
     @Test
+    fun dashboardUsesAuthenticatedDateScopedEndpoint() {
+        server.enqueue(
+            MockResponse.Builder()
+                .code(200)
+                .body("{\"today\":\"2026-09-29\",\"alerts\":[]}")
+                .build(),
+        )
+
+        val response = client.dashboard("dashboard-token", "2026-09-29")
+        val request = server.takeRequest()
+
+        assertEquals("/v1/dashboard", request.url.encodedPath)
+        assertEquals("2026-09-29", request.url.queryParameter("today"))
+        assertEquals("Bearer dashboard-token", request.headers["Authorization"])
+        assertEquals("2026-09-29", response.getString("today"))
+    }
+
+    @Test
     fun barcodeLookupUsesAuthenticatedCanonicalNutritionEndpoint() {
         server.enqueue(
             MockResponse.Builder()

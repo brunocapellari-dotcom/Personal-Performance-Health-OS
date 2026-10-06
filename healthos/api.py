@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
-from datetime import UTC, datetime
 import logging
 import re
 import time
+from collections.abc import Iterator
 from dataclasses import asdict
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 from uuid import uuid4
 
@@ -51,6 +51,7 @@ from .auth import (
 )
 from .config import Settings
 from .contracts import NutritionDataProvider, PackagedFoodProvider
+from .dashboard import DashboardEngine
 from .db import Database
 from .domain import (
     AvailabilityWindow,
@@ -62,11 +63,13 @@ from .domain import (
     TrainingEnvironment,
     TrainingResponse,
 )
+from .http_security import RequestBodyLimitMiddleware
 from .models import PlanSnapshotModel
 from .nutrition_sources import OpenFoodFactsProvider, UsdaFoodDataCentralProvider
 from .orchestrator import HealthOS
 from .state import PlanningStateResolver
 from .sync import IncomingChange, current_cursor, pull_changes, push_changes
+from .training_metrics import LongitudinalTrainingEngine, NutritionEntry, NutritionTotalsEngine
 
 
 LOGGER = logging.getLogger("healthos.api")
@@ -102,6 +105,10 @@ def create_app(
     )
     app.state.settings = resolved_settings
     app.state.database = resolved_database
+    app.add_middleware(
+        RequestBodyLimitMiddleware,
+        max_body_bytes=resolved_settings.max_request_body_bytes,
+    )
 
     @app.middleware("http")
     async def request_context(request: Request, call_next):
@@ -129,6 +136,12 @@ def create_app(
         response.headers["Pragma"] = "no-cache"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        if resolved_settings.is_production:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000"
+            response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
         return response
 
     def get_session() -> Iterator[Session]:
@@ -331,7 +344,10 @@ def create_app(
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="nutrition source unavailable") from exc
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="nutrition source returned invalid data") from exc
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="nutrition source returned invalid data",
+            ) from exc
         return NutritionSearchResponse(foods=[FoodRecordOut.model_validate(asdict(food)) for food in foods])
 
     @app.get("/v1/nutrition/barcode/{barcode}", response_model=FoodRecordOut)
@@ -340,7 +356,10 @@ def create_app(
         try:
             food = resolved_packaged_provider.lookup_barcode(barcode)
         except httpx.HTTPError as exc:
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="packaged food source unavailable") from exc
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="packaged food source unavailable",
+            ) from exc
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
         if food is None:
@@ -525,6 +544,98 @@ def create_app(
         )
         db.flush()
         return NextBlockResponse(snapshot_id=snapshot.snapshot_id, plan=plan_json, audit=audit_json)
+
+    @app.get("/v1/dashboard")
+    def dashboard(
+        db: DbSession,
+        actor: Actor,
+        today: Annotated[date, Query()],
+    ) -> dict[str, object]:
+        del actor
+        resolver = PlanningStateResolver()
+        planning_now = datetime(today.year, today.month, today.day, 23, 59, 59, tzinfo=UTC)
+        pipeline = resolver.health_pipeline(db, now=planning_now)
+        goals = resolver.goals(db, now=planning_now, pipeline=pipeline)
+        readiness = resolver.readiness(db, now=planning_now, pipeline=pipeline)
+        latest_plan = resolver.latest_plan_snapshot(db)
+        day_start = datetime(today.year, today.month, today.day, tzinfo=UTC)
+        day_end = day_start + timedelta(days=1)
+        logged_nutrition = tuple(
+            NutritionEntry(
+                energy_kcal=item.energy_kcal or 0.0,
+                protein_g=item.protein_g or 0.0,
+                carbohydrate_g=item.carbohydrate_g or 0.0,
+                fat_g=item.fat_g or 0.0,
+                fiber_g=item.fiber_g or 0.0,
+                hydration_l=item.hydration_l or 0.0,
+                micronutrients=item.micronutrients,
+            )
+            for item in resolver.nutrition_entries(db, start=day_start, end=day_end)
+        )
+        result = DashboardEngine().build(
+            today=today,
+            readiness=readiness,
+            goals=goals,
+            observations=pipeline,
+            performed_sessions=resolver.performed_sessions(db),
+            plan_json=None if latest_plan is None else dict(latest_plan.plan_json),
+            nutrition_entries=logged_nutrition,
+        )
+        return asdict(result)
+
+    @app.get("/v1/training/history")
+    def training_history(
+        db: DbSession,
+        actor: Actor,
+        days: Annotated[int, Query(ge=7, le=3660)] = 84,
+        today: Annotated[date | None, Query()] = None,
+    ) -> dict[str, object]:
+        del actor
+        reference_day = today or datetime.now(UTC).date()
+        report = LongitudinalTrainingEngine().build(
+            PlanningStateResolver().performed_sessions(db),
+            today=reference_day,
+            days=days,
+        )
+        return jsonable_encoder(asdict(report))
+
+    @app.get("/v1/nutrition/history")
+    def nutrition_history(
+        db: DbSession,
+        actor: Actor,
+        start: Annotated[date, Query()],
+        end: Annotated[date, Query()],
+    ) -> dict[str, object]:
+        del actor
+        if end < start:
+            raise HTTPException(status_code=422, detail="end must be on or after start")
+        if (end - start).days > 366:
+            raise HTTPException(status_code=422, detail="nutrition history range cannot exceed 366 days")
+        resolver = PlanningStateResolver()
+        start_at = datetime(start.year, start.month, start.day, tzinfo=UTC)
+        end_at = datetime(end.year, end.month, end.day, tzinfo=UTC) + timedelta(days=1)
+        entries = resolver.nutrition_entries(db, start=start_at, end=end_at)
+        totals = NutritionTotalsEngine().summarize(
+            tuple(
+                NutritionEntry(
+                    energy_kcal=item.energy_kcal or 0.0,
+                    protein_g=item.protein_g or 0.0,
+                    carbohydrate_g=item.carbohydrate_g or 0.0,
+                    fat_g=item.fat_g or 0.0,
+                    fiber_g=item.fiber_g or 0.0,
+                    hydration_l=item.hydration_l or 0.0,
+                    micronutrients=item.micronutrients,
+                )
+                for item in entries
+            )
+        )
+        return jsonable_encoder(
+            {
+                "entries": [item.model_dump(mode="json") for item in entries],
+                "totals": asdict(totals),
+                "count": len(entries),
+            }
+        )
 
     @app.get("/v1/observations/timeline")
     def observations_timeline(

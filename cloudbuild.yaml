@@ -1,0 +1,180 @@
+steps:
+  - id: start-backend-postgres
+    name: gcr.io/cloud-builders/docker
+    args:
+      - run
+      - -d
+      - --name=healthos-postgres
+      - --network=cloudbuild
+      - -e
+      - POSTGRES_USER=healthos
+      - -e
+      - POSTGRES_DB=healthos_test
+      - -e
+      - POSTGRES_HOST_AUTH_METHOD=trust
+      - postgres:18.6
+
+  - id: backend-full-gate
+    name: python:3.13-bookworm
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        apt-get update
+        apt-get install -y --no-install-recommends curl postgresql-client
+        rm -rf /var/lib/apt/lists/*
+        python -m pip install --upgrade pip
+        pip install -e '.[dev]'
+
+        for attempt in $(seq 1 30); do
+          pg_isready -h healthos-postgres -U healthos -d healthos_test && break
+          sleep 2
+        done
+        pg_isready -h healthos-postgres -U healthos -d healthos_test
+
+        export HEALTHOS_ENV=test
+        export HEALTHOS_DATABASE_URL=postgresql+psycopg://healthos@healthos-postgres:5432/healthos_test
+        export HEALTHOS_TEST_POSTGRES_URL=$$HEALTHOS_DATABASE_URL
+        export HEALTHOS_BOOTSTRAP_TOKEN="$$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+        export HEALTHOS_JWT_SECRET="$$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+        export HEALTHOS_AUDIT_HMAC_KEY="$$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+        export HEALTHOS_BLOB_KEY_B64="$$(python -c 'import base64,os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())')"
+        export HEALTHOS_BACKUP_KEY_B64="$$(python -c 'import base64,os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())')"
+        export HEALTHOS_TEST_BEARER_TOKEN="$$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+
+        alembic upgrade head
+        alembic check
+        python -m compileall -q healthos tests migrations
+        ruff check .
+        ruff format --check .
+        mypy healthos
+        bandit -r healthos -q
+        pip-audit
+        pytest --cov=healthos --cov-report=term-missing --cov-fail-under=85
+
+        uvicorn healthos.api:app --host 127.0.0.1 --port 8000 > /tmp/healthos-api.log 2>&1 &
+        pid=$$!
+        trap 'kill "$$pid" 2>/dev/null || true' EXIT
+        for attempt in $(seq 1 30); do
+          curl --fail --silent http://127.0.0.1:8000/healthz >/dev/null && break
+          sleep 1
+        done
+        schemathesis run http://127.0.0.1:8000/openapi.json \
+          --header "Authorization: Bearer $$HEALTHOS_TEST_BEARER_TOKEN" \
+          --exclude-path-regex '^/v1/(devices/enroll|auth/)' \
+          --phases=examples,coverage,fuzzing \
+          --max-examples 50 --max-response-time 3 --continue-on-failure
+
+  - id: android-full-regression
+    name: ghcr.io/cirruslabs/android-sdk:36
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        apt-get update
+        apt-get install -y --no-install-recommends curl unzip
+        rm -rf /var/lib/apt/lists/*
+        yes | sdkmanager --licenses >/dev/null
+        sdkmanager "platforms;android-37" "build-tools;36.0.0"
+        curl -fsSLo /tmp/gradle.zip https://services.gradle.org/distributions/gradle-9.6.1-bin.zip
+        unzip -q /tmp/gradle.zip -d /tmp
+        /tmp/gradle-9.6.1/bin/gradle -p android --no-daemon \
+          :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease
+
+  - id: source-security
+    name: ghcr.io/gitleaks/gitleaks:v8.30.1
+    args: ["dir", "/workspace", "--redact", "--no-banner"]
+
+  - id: dependency-vulnerability-scan
+    name: ghcr.io/google/osv-scanner@sha256:afd838850ac1a0fcc15ff4a041dc9ba11123c3f0d2666217a5f0fcf9222b55fa
+    args: ["scan", "source", "--recursive", "/workspace"]
+
+  - id: android-mobile-sast
+    name: python:3.13-bookworm
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        python -m pip install --disable-pip-version-check --no-cache-dir "mobsfscan==1.0.1"
+        mobsfscan --type android --config /workspace/.mobsf /workspace/android
+
+  - id: container-full-gate
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        docker run -d --name healthos-runtime-postgres --network cloudbuild \
+          -e POSTGRES_USER=healthos -e POSTGRES_DB=healthos \
+          -e POSTGRES_HOST_AUTH_METHOD=trust postgres:18.6
+        for attempt in $(seq 1 30); do
+          docker exec healthos-runtime-postgres pg_isready -U healthos -d healthos && break
+          sleep 2
+        done
+
+        docker run --rm -v /workspace:/workspace aquasec/trivy:0.74.0 \
+          fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL \
+          --ignore-unfixed --exit-code 1 /workspace
+
+        docker build --pull -t healthos-api:cloudbuild .
+        docker run --rm --entrypoint sh healthos-api:cloudbuild -c 'test "$$(id -u)" -ne 0'
+
+        bootstrap="$$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
+        jwt="$$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
+        audit="$$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
+        blob="$$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
+        backup="$$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
+
+        docker run --rm --network cloudbuild \
+          -e HEALTHOS_ENV=production \
+          -e HEALTHOS_DATABASE_URL=postgresql+psycopg://healthos@healthos-runtime-postgres:5432/healthos \
+          -e HEALTHOS_BOOTSTRAP_TOKEN="$$bootstrap" \
+          -e HEALTHOS_JWT_SECRET="$$jwt" \
+          -e HEALTHOS_AUDIT_HMAC_KEY="$$audit" \
+          -e HEALTHOS_BLOB_KEY_B64="$$blob" \
+          -e HEALTHOS_BACKUP_KEY_B64="$$backup" \
+          healthos-api:cloudbuild alembic upgrade head
+
+        docker run -d --name healthos-api --network cloudbuild \
+          -e HEALTHOS_ENV=production \
+          -e HEALTHOS_DATABASE_URL=postgresql+psycopg://healthos@healthos-runtime-postgres:5432/healthos \
+          -e HEALTHOS_BOOTSTRAP_TOKEN="$$bootstrap" \
+          -e HEALTHOS_JWT_SECRET="$$jwt" \
+          -e HEALTHOS_AUDIT_HMAC_KEY="$$audit" \
+          -e HEALTHOS_BLOB_KEY_B64="$$blob" \
+          -e HEALTHOS_BACKUP_KEY_B64="$$backup" \
+          healthos-api:cloudbuild
+
+        for attempt in $(seq 1 30); do
+          docker run --rm --network cloudbuild curlimages/curl:8.16.0 \
+            --fail --silent http://healthos-api:8000/healthz >/dev/null && break
+          sleep 2
+        done
+        docker run --rm --network cloudbuild curlimages/curl:8.16.0 \
+          --fail --silent http://healthos-api:8000/healthz >/dev/null
+
+        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.74.0 \
+          image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
+          healthos-api:cloudbuild
+
+        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+          -v /workspace:/workspace anchore/syft:v1.52.0 \
+          healthos-api:cloudbuild -o cyclonedx-json=/workspace/healthos-sbom.cdx.json
+        printf 'FULL_PROJECT_GATE_OK\n' > /workspace/cloudbuild-gate-summary.txt
+
+  - id: persist-evidence
+    name: gcr.io/google.com/cloudsdktool/google-cloud-cli:stable
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        printf '%s\n' "${COMMIT_SHA}" > /workspace/source-commit.txt
+        gcloud storage cp /workspace/cloudbuild-gate-summary.txt /workspace/source-commit.txt \
+          /workspace/healthos-sbom.cdx.json \
+          "gs://${PROJECT_ID}-ai-execution-evidence/Personal-Performance-Health-OS/${BUILD_ID}/"
+
+timeout: 10800s
+serviceAccount: "projects/${PROJECT_ID}/serviceAccounts/ai-build-executor@${PROJECT_ID}.iam.gserviceaccount.com"
+options:
+  machineType: E2_HIGHCPU_8
+  logging: CLOUD_LOGGING_ONLY

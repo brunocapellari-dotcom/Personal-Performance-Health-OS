@@ -33,6 +33,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import org.json.JSONObject
 import zxingcpp.BarcodeReader
 
 private val RETAIL_BARCODE_FORMATS = setOf(
@@ -45,11 +46,15 @@ private val RETAIL_BARCODE_FORMATS = setOf(
 @Composable
 fun NutritionBarcodeSection(
     resultText: String,
+    foods: List<JSONObject>,
     onLookupBarcode: (String) -> Unit,
     onSearchFoods: (String) -> Unit,
+    onLogFood: (JSONObject, Double, String) -> Unit,
 ) {
     var manualBarcode by remember { mutableStateOf("") }
     var foodQuery by remember { mutableStateOf("") }
+    var portionGrams by remember { mutableStateOf("100") }
+    var meal by remember { mutableStateOf("lanche") }
     var scannerOpen by remember { mutableStateOf(false) }
 
     Text("Nutrição", style = MaterialTheme.typography.titleMedium)
@@ -106,6 +111,41 @@ fun NutritionBarcodeSection(
     }
     if (resultText.isNotBlank()) {
         Text(resultText, style = MaterialTheme.typography.bodyMedium)
+    }
+    if (foods.isNotEmpty()) {
+        OutlinedTextField(
+            value = portionGrams,
+            onValueChange = { value ->
+                portionGrams = value
+                    .filter { it.isDigit() || it == '.' || it == ',' }
+                    .take(8)
+            },
+            label = { Text("Porção consumida (g)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = meal,
+            onValueChange = { meal = it.take(64) },
+            label = { Text("Refeição") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        foods.forEach { food ->
+            val name = food.optString("name", "Alimento")
+            Button(
+                onClick = {
+                    val quantity = portionGrams.replace(',', '.').toDoubleOrNull()
+                    val cleanMeal = meal.trim()
+                    if (quantity != null && quantity > 0.0 && cleanMeal.isNotBlank()) {
+                        onLogFood(food, quantity, cleanMeal)
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Registrar $name")
+            }
+        }
     }
 }
 

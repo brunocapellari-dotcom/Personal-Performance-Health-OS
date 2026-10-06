@@ -109,6 +109,88 @@ class HealthDataRepository(
         return api.searchFoods(token, normalized)
     }
 
+    suspend fun loadDashboard(today: LocalDate): JSONObject {
+        val token = api.authenticate(identity)
+        return api.dashboard(token, today.toString())
+    }
+
+    suspend fun loadTrainingHistory(days: Int, today: LocalDate): JSONObject {
+        val token = api.authenticate(identity)
+        return api.trainingHistory(token, days, today.toString())
+    }
+
+    suspend fun loadNutritionHistory(start: LocalDate, end: LocalDate): JSONObject {
+        require(!end.isBefore(start)) { "nutrition history end must not precede start" }
+        val token = api.authenticate(identity)
+        return api.nutritionHistory(token, start.toString(), end.toString())
+    }
+
+    suspend fun recordNutritionEntry(
+        food: JSONObject,
+        quantityG: Double,
+        meal: String,
+    ): String {
+        require(quantityG > 0.0 && quantityG <= 10000.0) { "quantity must be between 0 and 10000 g" }
+        val cleanMeal = meal.trim().replace(Regex("\\s+"), " ")
+        require(cleanMeal.length in 1..64) { "meal must contain 1 to 64 characters" }
+        val foodId = food.optString("food_id").trim()
+        val foodName = food.optString("name").trim()
+        val source = food.optString("source").trim()
+        require(foodId.isNotBlank() && foodName.isNotBlank() && source.isNotBlank()) {
+            "food record is missing canonical identity or provenance"
+        }
+
+        val factor = quantityG / 100.0
+        fun scaled(key: String): Double? =
+            if (!food.has(key) || food.isNull(key)) null else food.getDouble(key) * factor
+
+        val micronutrients = JSONObject()
+        val rawMicros = food.optJSONObject("micronutrients") ?: JSONObject()
+        val keys = rawMicros.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            val value = rawMicros.optDouble(key, Double.NaN)
+            if (value.isFinite() && value >= 0.0) micronutrients.put(key, value * factor)
+        }
+        val fiberG = sequence {
+            val micronutrientKeys = micronutrients.keys()
+            while (micronutrientKeys.hasNext()) yield(micronutrientKeys.next())
+        }
+            .firstOrNull { key -> key.lowercase().contains("fiber") }
+            ?.let { key -> micronutrients.optDouble(key, Double.NaN) }
+            ?.takeIf { it.isFinite() }
+
+        val entryId = UUID.randomUUID().toString()
+        val now = Instant.now()
+        val payload = JSONObject()
+            .put("entry_id", entryId)
+            .put("consumed_at", now.toString())
+            .put("meal", cleanMeal)
+            .put("food_id", foodId)
+            .put("food_name", foodName)
+            .put("quantity_g", quantityG)
+            .put("source", source)
+            .put("source_version", food.optNullable("source_version"))
+            .put("source_record_id", food.optNullable("source_record_id"))
+            .put("source_quality", food.optNullable("source_quality"))
+            .put("license_id", food.optNullable("license_id"))
+            .put("raw_hash", food.optNullable("raw_hash"))
+            .put("energy_kcal", scaled("energy_kcal_per_100g") ?: JSONObject.NULL)
+            .put("protein_g", scaled("protein_g_per_100g") ?: JSONObject.NULL)
+            .put("carbohydrate_g", scaled("carbohydrate_g_per_100g") ?: JSONObject.NULL)
+            .put("fat_g", scaled("fat_g_per_100g") ?: JSONObject.NULL)
+            .put("fiber_g", fiberG ?: JSONObject.NULL)
+            .put("micronutrients", micronutrients)
+
+        stageEntity(
+            entityType = "nutrition_entry",
+            entityId = entryId,
+            payload = payload,
+            logicalClock = now.toEpochMilli().coerceAtLeast(1),
+        )
+        return entryId
+    }
+
     suspend fun fullSync(mode: HealthIngestionMode = HealthIngestionMode.FOREGROUND): SyncSummary {
         val hasAnyRead = healthConnect.hasAnyReadPermission()
         val backgroundAllowed = mode != HealthIngestionMode.BACKGROUND || healthConnect.hasBackgroundReadPermission()
@@ -136,6 +218,86 @@ class HealthDataRepository(
     suspend fun pendingCount(): Int = database.pendingChangeDao().count()
 
     suspend fun conflictCount(): Int = database.syncConflictDao().count()
+
+    suspend fun saveWorkoutDraft(draft: WorkoutDraft) {
+        require(draft.sessionId.isNotBlank()) { "workout draft sessionId is required" }
+        require(draft.duration.length <= 4 && draft.duration.all(Char::isDigit)) { "invalid workout draft duration" }
+        val normalizedRpe = draft.rpe.replace(',', '.')
+        require(
+            draft.rpe.isBlank() ||
+                (normalizedRpe.toDoubleOrNull()?.let { it in 0.0..10.0 } == true),
+        ) { "invalid workout draft RPE" }
+        require(draft.notes.length <= 5000) { "workout draft notes exceed 5000 characters" }
+        database.syncStateDao().upsert(
+            SyncStateEntity(
+                key = "workout_draft:active",
+                value = draft.toJson(),
+                updatedAtEpochMillis = draft.updatedAtEpochMillis,
+            ),
+        )
+    }
+
+    suspend fun loadLatestWorkoutDraft(): WorkoutDraft? =
+        database.syncStateDao()
+            .get("workout_draft:active")
+            ?.value
+            ?.let(WorkoutDraft::fromJson)
+
+    suspend fun clearWorkoutDraft(sessionId: String) {
+        require(sessionId.isNotBlank()) { "sessionId is required" }
+        val active = loadLatestWorkoutDraft()
+        if (active?.sessionId == sessionId) {
+            database.syncStateDao().delete("workout_draft:active")
+        }
+    }
+
+    suspend fun recordBodyMeasurement(
+        metric: String,
+        value: Double,
+        unit: String,
+        label: String? = null,
+    ): String {
+        require(metric in setOf("weight", "waist", "abdomen", "chest", "arm", "thigh", "hip", "neck", "other")) {
+            "unsupported body measurement metric"
+        }
+        require(value > 0.0 && value <= 1000.0) { "body measurement value is outside accepted bounds" }
+        val cleanUnit = unit.trim()
+        require(cleanUnit.length in 1..32) { "body measurement unit is required" }
+        val id = UUID.randomUUID().toString()
+        val now = Instant.now()
+        val payload = JSONObject()
+            .put("metric", metric)
+            .put("value", value)
+            .put("unit", cleanUnit)
+            .put("observed_at", now.toString())
+            .put("label", label?.trim()?.takeIf(String::isNotBlank) ?: JSONObject.NULL)
+        stageEntity("body_measurement", id, payload, now.toEpochMilli().coerceAtLeast(1))
+        return id
+    }
+
+    suspend fun recordAssessment(
+        metric: String,
+        value: Double,
+        unit: String,
+        context: String? = null,
+    ): String {
+        val cleanMetric = metric.trim().replace(Regex("\\s+"), " ")
+        val cleanUnit = unit.trim()
+        require(cleanMetric.length in 1..128) { "assessment metric is required" }
+        require(value.isFinite()) { "assessment value must be finite" }
+        require(cleanUnit.length in 1..64) { "assessment unit is required" }
+        val id = UUID.randomUUID().toString()
+        val now = Instant.now()
+        val payload = JSONObject()
+            .put("assessment_id", id)
+            .put("metric", cleanMetric)
+            .put("value", value)
+            .put("unit", cleanUnit)
+            .put("observed_at", now.toString())
+            .put("context", context?.trim()?.takeIf(String::isNotBlank) ?: JSONObject.NULL)
+        stageEntity("assessment_result", id, payload, now.toEpochMilli().coerceAtLeast(1))
+        return id
+    }
 
     suspend fun saveInitialSetup(
         goalDescription: String,
@@ -226,11 +388,26 @@ class HealthDataRepository(
         rpe: Double?,
         notes: String = "",
         exercises: JSONArray = JSONArray(),
+        avgHrBpm: Double? = null,
+        maxHrBpm: Double? = null,
+        distanceM: Double? = null,
+        modality: String? = null,
+        avgPowerW: Double? = null,
+        avgCadenceRpm: Double? = null,
+        intervalStructure: String? = null,
     ): String {
         require(plannedSessionId.isNotBlank()) { "plannedSessionId is required" }
         require(durationMinutes in 0..1440) { "durationMinutes must be between 0 and 1440" }
         require(rpe == null || rpe in 0.0..10.0) { "RPE must be between 0 and 10" }
         require(notes.length <= 5000) { "notes exceed 5000 characters" }
+        require(avgHrBpm == null || avgHrBpm in 20.0..300.0) { "average HR is outside accepted bounds" }
+        require(maxHrBpm == null || maxHrBpm in 20.0..300.0) { "max HR is outside accepted bounds" }
+        require(avgHrBpm == null || maxHrBpm == null || avgHrBpm <= maxHrBpm) { "average HR cannot exceed max HR" }
+        require(distanceM == null || distanceM in 0.0..1_000_000.0) { "distance is outside accepted bounds" }
+        require(avgPowerW == null || avgPowerW in 0.0..5000.0) { "average power is outside accepted bounds" }
+        require(avgCadenceRpm == null || avgCadenceRpm in 0.0..300.0) { "cadence is outside accepted bounds" }
+        require(modality == null || modality.trim().length in 1..64) { "invalid modality" }
+        require(intervalStructure == null || intervalStructure.length <= 1000) { "interval structure is too long" }
 
         val performedId = UUID.randomUUID().toString()
         val now = Instant.now()
@@ -240,6 +417,13 @@ class HealthDataRepository(
             .put("completed", completed)
             .put("duration_minutes", durationMinutes)
             .put("rpe", rpe ?: JSONObject.NULL)
+            .put("avg_hr_bpm", avgHrBpm ?: JSONObject.NULL)
+            .put("max_hr_bpm", maxHrBpm ?: JSONObject.NULL)
+            .put("distance_m", distanceM ?: JSONObject.NULL)
+            .put("modality", modality?.trim() ?: JSONObject.NULL)
+            .put("avg_power_w", avgPowerW ?: JSONObject.NULL)
+            .put("avg_cadence_rpm", avgCadenceRpm ?: JSONObject.NULL)
+            .put("interval_structure", intervalStructure ?: JSONObject.NULL)
             .put("notes", notes)
             .put("exercises", exercises)
 
@@ -250,6 +434,35 @@ class HealthDataRepository(
             logicalClock = now.toEpochMilli().coerceAtLeast(1),
         )
         return performedId
+    }
+
+    suspend fun recordManualCardioSession(
+        modality: String,
+        durationMinutes: Int,
+        rpe: Double?,
+        distanceM: Double?,
+        avgHrBpm: Double?,
+        maxHrBpm: Double?,
+        avgPowerW: Double?,
+        avgCadenceRpm: Double?,
+        intervalStructure: String?,
+        notes: String,
+    ): String {
+        val sessionId = "manual-cardio-${UUID.randomUUID()}"
+        return recordPerformedSession(
+            plannedSessionId = sessionId,
+            completed = true,
+            durationMinutes = durationMinutes,
+            rpe = rpe,
+            notes = notes,
+            avgHrBpm = avgHrBpm,
+            maxHrBpm = maxHrBpm,
+            distanceM = distanceM,
+            modality = modality,
+            avgPowerW = avgPowerW,
+            avgCadenceRpm = avgCadenceRpm,
+            intervalStructure = intervalStructure,
+        )
     }
 
     private suspend fun stageEntity(
@@ -485,6 +698,9 @@ class HealthDataRepository(
     private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray(Charsets.UTF_8))
         .joinToString("") { "%02x".format(it) }
+
+    private fun JSONObject.optNullable(key: String): Any =
+        if (!has(key) || isNull(key)) JSONObject.NULL else get(key)
 
     private fun JSONArray.toStringList(): List<String> = List(length()) { index -> getString(index) }
 }

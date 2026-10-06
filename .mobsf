@@ -1,0 +1,4 @@
+---
+- severity-filter:
+    - WARNING
+    - ERROR

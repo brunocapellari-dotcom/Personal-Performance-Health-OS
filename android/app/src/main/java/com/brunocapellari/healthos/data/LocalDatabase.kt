@@ -97,6 +97,9 @@ interface SyncStateDao {
 
     @Upsert
     suspend fun upsert(state: SyncStateEntity)
+
+    @Query("DELETE FROM sync_state WHERE `key` = :key")
+    suspend fun delete(key: String)
 }
 
 @Dao

@@ -36,6 +36,19 @@ class EvidenceKind(StrEnum):
     HYPOTHESIS = "HYPOTHESIS"
 
 
+class SetType(StrEnum):
+    WARM_UP = "warm_up"
+    WORKING = "working"
+    BACK_OFF = "back_off"
+    DROP = "drop"
+    AMRAP = "amrap"
+
+
+class ExerciseGroupType(StrEnum):
+    SUPERSET = "superset"
+    CIRCUIT = "circuit"
+
+
 @dataclass(frozen=True)
 class Goal:
     goal_id: str
@@ -175,6 +188,10 @@ class ExercisePrescription:
     distance_m: float | None = None
     rest_seconds: int | None = None
     tempo: str | None = None
+    set_type: SetType = SetType.WORKING
+    group_type: ExerciseGroupType | None = None
+    group_id: str | None = None
+    alternatives: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -279,18 +296,25 @@ class Observation:
 @dataclass(frozen=True)
 class PerformedSet:
     set_number: int
+    completed: bool = True
+    completed_at: datetime | None = None
     reps: int | None = None
     load_kg: float | None = None
     rir: float | None = None
     rpe: float | None = None
     duration_seconds: int | None = None
     distance_m: float | None = None
+    set_type: SetType = SetType.WORKING
 
 
 @dataclass(frozen=True)
 class PerformedExercise:
     exercise_id: str
     sets: tuple[PerformedSet, ...]
+    planned_exercise_id: str | None = None
+    substitution_reason: str | None = None
+    group_type: ExerciseGroupType | None = None
+    group_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -304,4 +328,8 @@ class PerformedSession:
     avg_hr_bpm: float | None = None
     max_hr_bpm: float | None = None
     distance_m: float | None = None
+    modality: str | None = None
+    avg_power_w: float | None = None
+    avg_cadence_rpm: float | None = None
+    interval_structure: str | None = None
     exercises: tuple[PerformedExercise, ...] = ()

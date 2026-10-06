@@ -23,6 +23,7 @@ APPEND_ONLY_TYPES = frozenset(
         "supplement_event",
         "assessment_result",
         "body_measurement",
+        "nutrition_entry",
     }
 )
 

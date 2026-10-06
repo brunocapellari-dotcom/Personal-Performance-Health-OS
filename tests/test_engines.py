@@ -151,3 +151,31 @@ def test_recent_high_rpe_caps_frequency_even_with_good_adherence() -> None:
     assert decision.target_sessions_per_week == 2
     assert decision.volume_modifier == 0.85
     assert "high_recent_rpe" in decision.reasons
+
+
+
+def test_substitutions_are_environment_safe_and_preserve_movement_pattern() -> None:
+    env = TrainingEnvironment(
+        Environment.HOME,
+        frozenset({"dumbbells", "band"}),
+        10.0,
+        noise_limit="low",
+    )
+    selector = ExerciseSelector()
+    options = selector.substitutions(env, "one_arm_db_row")
+    assert options
+    assert options[0].exercise_id == "band_row"
+    assert all(item.movement_pattern == "pull" for item in options)
+    assert all(item.equipment.issubset(env.equipment) for item in options)
+
+
+def test_substitutions_do_not_offer_ineligible_catalog_alternative() -> None:
+    env = TrainingEnvironment(
+        Environment.TRAVEL,
+        frozenset(),
+        5.0,
+        noise_limit="low",
+    )
+    selector = ExerciseSelector()
+    options = selector.substitutions(env, "pushup")
+    assert all(item.exercise_id != "db_floor_press" for item in options)

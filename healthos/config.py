@@ -17,6 +17,7 @@ class Settings:
     blob_directory: str = ".healthos-blobs"
     access_token_minutes: int = 15
     challenge_ttl_seconds: int = 300
+    max_request_body_bytes: int = 2 * 1024 * 1024
     test_bearer_token: str | None = None
     fdc_api_key: str | None = None
     open_food_facts_user_agent: str = "PersonalPerformanceHealthOS/0.2"
@@ -34,6 +35,7 @@ class Settings:
             blob_directory=os.getenv("HEALTHOS_BLOB_DIRECTORY", ".healthos-blobs").strip(),
             access_token_minutes=int(os.getenv("HEALTHOS_ACCESS_TOKEN_MINUTES", "15")),
             challenge_ttl_seconds=int(os.getenv("HEALTHOS_CHALLENGE_TTL_SECONDS", "300")),
+            max_request_body_bytes=int(os.getenv("HEALTHOS_MAX_REQUEST_BODY_BYTES", str(2 * 1024 * 1024))),
             test_bearer_token=os.getenv("HEALTHOS_TEST_BEARER_TOKEN") or None,
             fdc_api_key=os.getenv("HEALTHOS_FDC_API_KEY") or None,
             open_food_facts_user_agent=os.getenv(
@@ -68,6 +70,8 @@ class Settings:
             raise RuntimeError("HEALTHOS_ACCESS_TOKEN_MINUTES must be between 1 and 60")
         if self.challenge_ttl_seconds < 30 or self.challenge_ttl_seconds > 900:
             raise RuntimeError("HEALTHOS_CHALLENGE_TTL_SECONDS must be between 30 and 900")
+        if self.max_request_body_bytes < 65536 or self.max_request_body_bytes > 16 * 1024 * 1024:
+            raise RuntimeError("HEALTHOS_MAX_REQUEST_BODY_BYTES must be between 65536 and 16777216")
         if self.test_bearer_token and self.is_production:
             raise RuntimeError("HEALTHOS_TEST_BEARER_TOKEN is forbidden in production")
         if not self.open_food_facts_user_agent:

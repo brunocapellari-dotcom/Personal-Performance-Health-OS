@@ -11,14 +11,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -28,11 +26,14 @@ import androidx.compose.ui.unit.dp
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.lifecycleScope
+import com.brunocapellari.healthos.data.WorkoutDraft
+import com.brunocapellari.healthos.data.WorkoutDraftExercise
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.LocalDate
 
 data class HealthPermissionStatus(
     val coreComplete: Boolean,
@@ -47,12 +48,11 @@ data class PlannedExerciseUi(
     val plannedSets: Int,
     val suggestedLoadKg: Double?,
     val targetRir: Double,
-)
-
-data class ExerciseLogValues(
-    val loadKg: String = "",
-    val repsCsv: String = "",
-    val rirCsv: String = "",
+    val restSeconds: Int? = null,
+    val setType: String = "working",
+    val groupType: String? = null,
+    val groupId: String? = null,
+    val alternatives: List<String> = emptyList(),
 )
 
 class MainActivity : ComponentActivity() {
@@ -62,6 +62,10 @@ class MainActivity : ComponentActivity() {
     private val activeExercises = mutableStateOf<List<PlannedExerciseUi>>(emptyList())
     private val pairingTokenText = mutableStateOf("")
     private val nutritionText = mutableStateOf("")
+    private val nutritionFoods = mutableStateOf<List<JSONObject>>(emptyList())
+    private val dashboardText = mutableStateOf("Resumo diário ainda não carregado")
+    private val historyText = mutableStateOf("Histórico ainda não carregado")
+    private val workoutDraft = mutableStateOf<WorkoutDraft?>(null)
 
     private val permissionsLauncher = registerForActivityResult(
         PermissionController.createRequestPermissionResultContract(),
@@ -80,6 +84,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         refreshHealthStatus()
+        restoreWorkoutDraft()
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -111,12 +116,23 @@ class MainActivity : ComponentActivity() {
                             onEnroll = ::enroll,
                             onSync = ::syncNow,
                             onSaveInitialSetup = ::saveInitialSetup,
+                            onBodyMeasurement = ::recordBodyMeasurement,
+                            onAssessment = ::recordAssessment,
+                            onRecordCardio = ::recordCardio,
                             nutritionResult = nutritionText.value,
+                            nutritionFoods = nutritionFoods.value,
+                            dashboardResult = dashboardText.value,
+                            historyResult = historyText.value,
+                            onRefreshDashboard = ::refreshDashboard,
+                            onRefreshHistory = ::refreshHistory,
                             onLookupBarcode = ::lookupFoodBarcode,
                             onSearchFoods = ::searchFoods,
+                            onLogFood = ::logFood,
                             activeSessionId = activeSessionId.value,
                             plannedExercises = activeExercises.value,
+                            initialDraft = workoutDraft.value,
                             onNextBlock = ::nextBlock,
+                            onSaveWorkoutDraft = ::saveWorkoutDraft,
                             onRecordSession = ::recordSession,
                         )
                     }
@@ -225,14 +241,78 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun recordBodyMeasurement(metric: String, value: Double, unit: String, label: String?) {
+        lifecycleScope.launch {
+            statusText.value = "Registrando medida corporal"
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    container.repository.recordBodyMeasurement(metric, value, unit, label)
+                    container.repository.fullSync()
+                }
+            }.onSuccess {
+                statusText.value = "Medida corporal registrada e sincronizada"
+                refreshDashboard()
+            }.onFailure {
+                statusText.value = "Falha ao registrar medida: ${it.message ?: "erro desconhecido"}"
+            }
+        }
+    }
+
+    private fun recordAssessment(metric: String, value: Double, unit: String, context: String?) {
+        lifecycleScope.launch {
+            statusText.value = "Registrando avaliação"
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    container.repository.recordAssessment(metric, value, unit, context)
+                    container.repository.fullSync()
+                }
+            }.onSuccess {
+                statusText.value = "Avaliação registrada e sincronizada"
+                refreshDashboard()
+            }.onFailure {
+                statusText.value = "Falha ao registrar avaliação: ${it.message ?: "erro desconhecido"}"
+            }
+        }
+    }
+
+    private fun recordCardio(input: ManualCardioInput) {
+        lifecycleScope.launch {
+            statusText.value = "Registrando cardio"
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    container.repository.recordManualCardioSession(
+                        modality = input.modality,
+                        durationMinutes = input.durationMinutes,
+                        rpe = input.rpe,
+                        distanceM = input.distanceM,
+                        avgHrBpm = input.avgHrBpm,
+                        maxHrBpm = input.maxHrBpm,
+                        avgPowerW = input.avgPowerW,
+                        avgCadenceRpm = input.avgCadenceRpm,
+                        intervalStructure = input.intervalStructure,
+                        notes = input.notes,
+                    )
+                    container.repository.fullSync()
+                }
+            }.onSuccess {
+                statusText.value = "Cardio registrado e sincronizado"
+                refreshDashboard()
+            }.onFailure {
+                statusText.value = "Falha ao registrar cardio: ${it.message ?: "erro desconhecido"}"
+            }
+        }
+    }
+
     private fun lookupFoodBarcode(barcode: String) {
         lifecycleScope.launch {
             nutritionText.value = "Buscando produto..."
             runCatching {
                 withContext(Dispatchers.IO) { container.repository.lookupFoodBarcode(barcode) }
             }.onSuccess { food ->
+                nutritionFoods.value = listOf(food)
                 nutritionText.value = formatFood(food)
             }.onFailure {
+                nutritionFoods.value = emptyList()
                 nutritionText.value = "Produto não encontrado ou fonte indisponível: ${it.message ?: "erro desconhecido"}"
             }
         }
@@ -245,6 +325,7 @@ class MainActivity : ComponentActivity() {
                 withContext(Dispatchers.IO) { container.repository.searchFoods(query) }
             }.onSuccess { response ->
                 val foods = response.optJSONArray("foods") ?: JSONArray()
+                nutritionFoods.value = List(minOf(foods.length(), 8)) { index -> foods.getJSONObject(index) }
                 nutritionText.value = if (foods.length() == 0) {
                     "Nenhum alimento encontrado."
                 } else {
@@ -257,7 +338,25 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }.onFailure {
+                nutritionFoods.value = emptyList()
                 nutritionText.value = "Busca de alimentos indisponível: ${it.message ?: "erro desconhecido"}"
+            }
+        }
+    }
+
+    private fun logFood(food: JSONObject, quantityG: Double, meal: String) {
+        lifecycleScope.launch {
+            statusText.value = "Registrando alimento consumido"
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    container.repository.recordNutritionEntry(food, quantityG, meal)
+                    container.repository.fullSync()
+                }
+            }.onSuccess {
+                statusText.value = "Alimento registrado e sincronizado"
+                refreshDashboard()
+            }.onFailure {
+                statusText.value = "Falha ao registrar alimento: ${it.message ?: "erro desconhecido"}"
             }
         }
     }
@@ -297,8 +396,173 @@ class MainActivity : ComponentActivity() {
                     "Sync concluído: ${summary.pushed} enviados, ${summary.pulled} recebidos, " +
                     "${summary.conflicts} conflitos$healthNote"
                 refreshHealthStatus()
+                refreshDashboard()
             }.onFailure {
                 statusText.value = "Falha de sync: ${it.message ?: "erro desconhecido"}"
+            }
+        }
+    }
+
+    private fun restoreWorkoutDraft() {
+        lifecycleScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { container.repository.loadLatestWorkoutDraft() }
+            }.onSuccess { draft ->
+                if (draft != null) {
+                    workoutDraft.value = draft
+                    activeSessionId.value = draft.sessionId
+                    activeExercises.value = draft.exercises.map { exercise ->
+                        PlannedExerciseUi(
+                            exerciseId = exercise.plannedExerciseId,
+                            plannedSets = exercise.plannedSets,
+                            suggestedLoadKg = exercise.suggestedLoadKg,
+                            targetRir = exercise.targetRir,
+                            restSeconds = exercise.restSeconds,
+                            setType = exercise.setType,
+                            groupType = exercise.groupType,
+                            groupId = exercise.groupId,
+                            alternatives = exercise.alternatives,
+                        )
+                    }
+                    statusText.value = "Treino em andamento restaurado do armazenamento local"
+                }
+            }.onFailure {
+                statusText.value = "Não foi possível restaurar o treino em andamento"
+            }
+        }
+    }
+
+    private fun saveWorkoutDraft(draft: WorkoutDraft) {
+        lifecycleScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { container.repository.saveWorkoutDraft(draft) }
+            }.onFailure {
+                statusText.value = "Falha ao salvar rascunho local do treino"
+            }
+        }
+    }
+
+    private fun refreshHistory() {
+        lifecycleScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val today = LocalDate.now()
+                    val training = container.repository.loadTrainingHistory(days = 84, today = today)
+                    val nutrition = container.repository.loadNutritionHistory(today.minusDays(13), today)
+                    training to nutrition
+                }
+            }.onSuccess { (training, nutrition) ->
+                historyText.value = formatHistory(training, nutrition)
+            }.onFailure {
+                historyText.value = "Histórico indisponível: ${it.message ?: "erro desconhecido"}"
+            }
+        }
+    }
+
+    private fun formatHistory(training: JSONObject, nutrition: JSONObject): String {
+        val weekly = training.optJSONArray("weekly") ?: JSONArray()
+        val records = training.optJSONArray("personal_records") ?: JSONArray()
+        val exercises = training.optJSONObject("exercises") ?: JSONObject()
+        val nutritionTotals = nutrition.optJSONObject("totals") ?: JSONObject()
+        val exerciseCount = exercises.keys().asSequence().count()
+
+        return buildString {
+            append("Treino (84 dias): ")
+            append(exerciseCount)
+            append(" exercícios com histórico • ")
+            append(records.length())
+            append(" PRs")
+            if (weekly.length() > 0) {
+                val lastWeek = weekly.getJSONObject(weekly.length() - 1)
+                append("\nÚltima semana com treino: ")
+                append(lastWeek.optInt("sessions"))
+                append(" sessões • ")
+                append(lastWeek.optInt("total_minutes"))
+                append(" min • carga sRPE ")
+                append(lastWeek.optDouble("total_session_rpe_load"))
+                if (!lastWeek.isNull("monotony")) {
+                    append(" • monotonia ")
+                    append(lastWeek.optDouble("monotony"))
+                    append(" • strain ")
+                    append(lastWeek.optDouble("strain"))
+                }
+            }
+            append("\nNutrição (14 dias): ")
+            append(nutrition.optInt("count"))
+            append(" lançamentos • ")
+            append(nutritionTotals.optDouble("energy_kcal"))
+            append(" kcal registradas no período")
+        }
+    }
+
+    private fun refreshDashboard() {
+        lifecycleScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { container.repository.loadDashboard(LocalDate.now()) }
+            }.onSuccess { response ->
+                dashboardText.value = formatDashboard(response)
+            }.onFailure {
+                dashboardText.value = "Resumo diário indisponível: ${it.message ?: "erro desconhecido"}"
+            }
+        }
+    }
+
+    private fun formatDashboard(response: JSONObject): String {
+        fun display(obj: JSONObject, key: String): String =
+            if (!obj.has(key) || obj.isNull(key)) "—" else obj.get(key).toString()
+
+        val training = response.optJSONObject("training") ?: JSONObject()
+        val recovery = response.optJSONObject("recovery") ?: JSONObject()
+        val activity = response.optJSONObject("activity") ?: JSONObject()
+        val body = response.optJSONObject("body") ?: JSONObject()
+        val nutrition = response.optJSONObject("nutrition") ?: JSONObject()
+        val reconciliation = response.optJSONObject("reconciliation") ?: JSONObject()
+        val alerts = response.optJSONArray("alerts") ?: JSONArray()
+
+        return buildString {
+            append("Treino: ")
+            append(display(training, "focus"))
+            append(" • ")
+            append(display(training, "duration_minutes"))
+            append(" min")
+            append("\nRecuperação: ")
+            append(display(recovery, "readiness_score"))
+            append(" • ")
+            append(display(recovery, "action"))
+            append("\nSemana: ")
+            append(display(activity, "sessions"))
+            append(" sessões • ")
+            append(display(activity, "total_minutes"))
+            append(" min")
+            append("\nPassos hoje: ")
+            append(display(activity, "steps_today"))
+            append("\nPeso: ")
+            append(display(body, "latest_weight_kg"))
+            append(" kg • média móvel ")
+            append(display(body, "weight_rolling_average_kg"))
+            append(" kg")
+            append("\nNutrição: ")
+            append(display(nutrition, "energy_kcal"))
+            append(" kcal • proteína ")
+            append(display(nutrition, "protein_g"))
+            append(" g • fibra ")
+            append(display(nutrition, "fiber_g"))
+            append(" g")
+            if (!nutrition.isNull("target_energy_kcal")) {
+                append(" • meta ")
+                append(display(nutrition, "target_energy_kcal"))
+                append(" kcal")
+            }
+            append("\nHealth Connect: ")
+            append(display(reconciliation, "match_count"))
+            append(" treino(s) reconciliado(s), classificação ")
+            append(display(reconciliation, "evidence_kind"))
+            if (alerts.length() > 0) {
+                append("\nAlertas:")
+                for (index in 0 until alerts.length()) {
+                    append("\n• ")
+                    append(alerts.getString(index))
+                }
             }
         }
     }
@@ -324,9 +588,14 @@ class MainActivity : ComponentActivity() {
                         exercises = exercises,
                     )
                     container.repository.fullSync()
+                    container.repository.clearWorkoutDraft(plannedSessionId)
                 }
             }.onSuccess {
+                workoutDraft.value = null
+                activeSessionId.value = ""
+                activeExercises.value = emptyList()
                 statusText.value = "Treino realizado registrado e sincronizado"
+                refreshDashboard()
             }.onFailure {
                 statusText.value = "Falha ao registrar treino: ${it.message ?: "erro desconhecido"}"
             }
@@ -353,8 +622,34 @@ class MainActivity : ComponentActivity() {
                                 plannedSets = item.getInt("sets"),
                                 suggestedLoadKg = if (item.isNull("load_kg")) null else item.getDouble("load_kg"),
                                 targetRir = item.getDouble("target_rir"),
+                                restSeconds = if (item.isNull("rest_seconds")) null else item.getInt("rest_seconds"),
+                                setType = item.optString("set_type", "working"),
+                                groupType = item.optString("group_type").takeIf(String::isNotBlank),
+                                groupId = item.optString("group_id").takeIf(String::isNotBlank),
+                                alternatives = item.optJSONArray("alternatives")?.let { array ->
+                                    List(array.length()) { alternativeIndex -> array.getString(alternativeIndex) }
+                                }.orEmpty(),
                             )
                         }
+                        val draft = WorkoutDraft(
+                            sessionId = activeSessionId.value,
+                            exercises = activeExercises.value.map { exercise ->
+                                WorkoutDraftExercise(
+                                    plannedExerciseId = exercise.exerciseId,
+                                    exerciseId = exercise.exerciseId,
+                                    plannedSets = exercise.plannedSets,
+                                    suggestedLoadKg = exercise.suggestedLoadKg,
+                                    targetRir = exercise.targetRir,
+                                    restSeconds = exercise.restSeconds,
+                                    setType = exercise.setType,
+                                    groupType = exercise.groupType,
+                                    groupId = exercise.groupId,
+                                    alternatives = exercise.alternatives,
+                                )
+                            },
+                        )
+                        workoutDraft.value = draft
+                        saveWorkoutDraft(draft)
                     } else {
                         activeSessionId.value = ""
                         activeExercises.value = emptyList()
@@ -362,6 +657,7 @@ class MainActivity : ComponentActivity() {
                     statusText.value =
                         "Novo bloco auditado e aprovado (${response.getString("snapshot_id").take(8)}); " +
                         "${sessions.length()} sessões planejadas"
+                    refreshDashboard()
                 } else {
                     statusText.value = "Bloco rejeitado pela auditoria"
                 }
@@ -378,6 +674,7 @@ private fun Dashboard(
     operationStatus: String,
     activeSessionId: String,
     plannedExercises: List<PlannedExerciseUi>,
+    initialDraft: WorkoutDraft?,
     pairingToken: String,
     onCorePermissions: () -> Unit,
     onPerformancePermissions: () -> Unit,
@@ -388,35 +685,38 @@ private fun Dashboard(
     onEnroll: (String) -> Unit,
     onSync: () -> Unit,
     onSaveInitialSetup: (InitialSetupInput) -> Unit,
+    onBodyMeasurement: (String, Double, String, String?) -> Unit,
+    onAssessment: (String, Double, String, String?) -> Unit,
+    onRecordCardio: (ManualCardioInput) -> Unit,
     nutritionResult: String,
+    nutritionFoods: List<JSONObject>,
+    dashboardResult: String,
+    historyResult: String,
+    onRefreshDashboard: () -> Unit,
+    onRefreshHistory: () -> Unit,
     onLookupBarcode: (String) -> Unit,
     onSearchFoods: (String) -> Unit,
+    onLogFood: (JSONObject, Double, String) -> Unit,
     onNextBlock: () -> Unit,
+    onSaveWorkoutDraft: (WorkoutDraft) -> Unit,
     onRecordSession: (String, Boolean, Int, Double?, String, JSONArray) -> Unit,
 ) {
     var bootstrapToken by remember { mutableStateOf("") }
-    var sessionId by remember(activeSessionId) { mutableStateOf(activeSessionId) }
-    var completed by remember { mutableStateOf(true) }
-    var duration by remember { mutableStateOf("") }
-    var rpe by remember { mutableStateOf("") }
-    var notes by remember { mutableStateOf("") }
-    val exerciseLogs = remember(activeSessionId, plannedExercises) {
-        mutableStateMapOf<String, ExerciseLogValues>().apply {
-            plannedExercises.forEach { exercise ->
-                put(
-                    exercise.exerciseId,
-                    ExerciseLogValues(
-                        loadKg = exercise.suggestedLoadKg?.toString() ?: "",
-                    ),
-                )
-            }
-        }
-    }
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("Personal Performance & Health OS", style = MaterialTheme.typography.headlineSmall)
+        Text("Resumo de hoje", style = MaterialTheme.typography.titleMedium)
+        Text(dashboardResult, style = MaterialTheme.typography.bodyMedium)
+        Button(onClick = onRefreshDashboard, modifier = Modifier.fillMaxWidth()) {
+            Text("Atualizar resumo")
+        }
+        HistorySection(
+            summary = historyResult,
+            onRefresh = onRefreshHistory,
+        )
+
         Text(healthStatus)
         Button(onClick = onCorePermissions, modifier = Modifier.fillMaxWidth()) {
             Text("Autorizar métricas básicas do Health Connect")
@@ -433,6 +733,7 @@ private fun Dashboard(
         Button(onClick = onExtendedPermissions, modifier = Modifier.fillMaxWidth()) {
             Text("Autorizar histórico ampliado e segundo plano (opcional)")
         }
+
         Button(onClick = onGeneratePairingToken, modifier = Modifier.fillMaxWidth()) {
             Text("Gerar token temporário para outro aparelho")
         }
@@ -456,139 +757,35 @@ private fun Dashboard(
         ) {
             Text("Vincular este aparelho")
         }
+
         Button(onClick = onSync, modifier = Modifier.fillMaxWidth()) {
             Text("Sincronizar agora")
         }
+
         InitialSetupSection(onSave = onSaveInitialSetup)
+        TrackingSection(
+            onBodyMeasurement = onBodyMeasurement,
+            onAssessment = onAssessment,
+        )
+        CardioSection(onSave = onRecordCardio)
         NutritionBarcodeSection(
             resultText = nutritionResult,
+            foods = nutritionFoods,
             onLookupBarcode = onLookupBarcode,
             onSearchFoods = onSearchFoods,
+            onLogFood = onLogFood,
         )
         Button(onClick = onNextBlock, modifier = Modifier.fillMaxWidth()) {
             Text("Monta meu próximo bloco")
         }
 
-        Text("Registrar treino realizado", style = MaterialTheme.typography.titleMedium)
-        OutlinedTextField(
-            value = sessionId,
-            onValueChange = { sessionId = it },
-            label = { Text("ID da sessão planejada") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+        WorkoutSessionSection(
+            activeSessionId = activeSessionId,
+            plannedExercises = plannedExercises,
+            initialDraft = initialDraft,
+            onSaveWorkoutDraft = onSaveWorkoutDraft,
+            onRecordSession = onRecordSession,
         )
-        Column {
-            Text("Sessão concluída")
-            Checkbox(checked = completed, onCheckedChange = { completed = it })
-        }
-        OutlinedTextField(
-            value = duration,
-            onValueChange = { duration = it.filter { char -> char.isDigit() } },
-            label = { Text("Duração em minutos") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = rpe,
-            onValueChange = { value ->
-                rpe = value.filter { char -> char.isDigit() || char == '.' || char == ',' }
-            },
-            label = { Text("RPE da sessão (0–10, opcional)") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        plannedExercises.forEach { exercise ->
-            val values = exerciseLogs[exercise.exerciseId] ?: ExerciseLogValues()
-            Text(
-                "${exercise.exerciseId} — ${exercise.plannedSets} séries; RIR alvo ${exercise.targetRir}",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            OutlinedTextField(
-                value = values.loadKg,
-                onValueChange = { value ->
-                    exerciseLogs[exercise.exerciseId] = values.copy(
-                        loadKg = value.filter { char -> char.isDigit() || char == '.' || char == ',' },
-                    )
-                },
-                label = { Text("Carga kg (vazio para peso corporal)") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedTextField(
-                value = values.repsCsv,
-                onValueChange = { value ->
-                    exerciseLogs[exercise.exerciseId] = values.copy(
-                        repsCsv = value.filter { char -> char.isDigit() || char == ',' || char == ' ' },
-                    )
-                },
-                label = { Text("Repetições por série, ex.: 12,12,10") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedTextField(
-                value = values.rirCsv,
-                onValueChange = { value ->
-                    exerciseLogs[exercise.exerciseId] = values.copy(
-                        rirCsv = value.filter { char ->
-                            char.isDigit() || char == ',' || char == '.' || char == ' '
-                        },
-                    )
-                },
-                label = { Text("RIR por série, ex.: 3,2,2") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-
-        OutlinedTextField(
-            value = notes,
-            onValueChange = { if (it.length <= 5000) notes = it },
-            label = { Text("Observações") },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Button(
-            onClick = {
-                val parsedDuration = duration.toIntOrNull()
-                val parsedRpe = rpe.replace(',', '.').toDoubleOrNull()
-                if (
-                    sessionId.isNotBlank() &&
-                    parsedDuration != null &&
-                    (parsedRpe == null || parsedRpe in 0.0..10.0)
-                ) {
-                    val exercisePayload = JSONArray()
-                    plannedExercises.forEach { exercise ->
-                        val values = exerciseLogs[exercise.exerciseId] ?: ExerciseLogValues()
-                        val reps = values.repsCsv.split(',')
-                            .mapNotNull { item -> item.trim().toIntOrNull() }
-                        val rirs = values.rirCsv.split(',')
-                            .mapNotNull { item -> item.trim().replace(',', '.').toDoubleOrNull() }
-                        val load = values.loadKg.replace(',', '.').toDoubleOrNull()
-                        val sets = JSONArray()
-                        reps.forEachIndexed { index, repetitions ->
-                            sets.put(
-                                JSONObject()
-                                    .put("set_number", index + 1)
-                                    .put("reps", repetitions)
-                                    .put("load_kg", load ?: JSONObject.NULL)
-                                    .put("rir", rirs.getOrNull(index) ?: JSONObject.NULL),
-                            )
-                        }
-                        exercisePayload.put(
-                            JSONObject()
-                                .put("exercise_id", exercise.exerciseId)
-                                .put("sets", sets),
-                        )
-                    }
-                    onRecordSession(sessionId, completed, parsedDuration, parsedRpe, notes, exercisePayload)
-                    duration = ""
-                    rpe = ""
-                    notes = ""
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Salvar e sincronizar treino")
-        }
         Text(operationStatus, style = MaterialTheme.typography.bodyMedium)
     }
 }

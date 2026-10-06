@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -10,6 +11,7 @@ from .domain import (
     AvailabilityWindow,
     Environment,
     Event,
+    ExerciseGroupType,
     Goal,
     GoalStatus,
     NutritionTrend,
@@ -19,6 +21,7 @@ from .domain import (
     Phase,
     ReadinessInput,
     SessionPlan,
+    SetType,
     StrengthProgression,
     TrainingEnvironment,
     TrainingResponse,
@@ -28,6 +31,7 @@ from .entity_payloads import (
     CalendarAvailabilityPayload,
     EventPayload,
     GoalPayload,
+    NutritionEntryPayload,
     NutritionTrendPayload,
     PerformedSessionPayload,
     ReadinessPayload,
@@ -219,6 +223,24 @@ class PlanningStateResolver:
             pain_flag=payload.pain_flag,
         )
 
+    def nutrition_entries(
+        self,
+        db: Session,
+        *,
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> tuple[NutritionEntryPayload, ...]:
+        entries: list[NutritionEntryPayload] = []
+        for row in self._active(db, "nutrition_entry"):
+            payload = NutritionEntryPayload.model_validate(row.payload)
+            consumed = payload.consumed_at
+            if start is not None and consumed < start:
+                continue
+            if end is not None and consumed >= end:
+                continue
+            entries.append(payload)
+        return tuple(sorted(entries, key=lambda item: (item.consumed_at, item.entry_id)))
+
     def nutrition(self, db: Session) -> NutritionTrend | None:
         row = self._latest(db, "nutrition_trend")
         if row is None:
@@ -275,6 +297,12 @@ class PlanningStateResolver:
             if previous is None or ordering > previous[0]:
                 latest[payload.metric] = (ordering, payload.value)
         return {metric: value for metric, (_, value) in latest.items()}
+
+    def performed_sessions(self, db: Session) -> tuple[PerformedSession, ...]:
+        return self._performed_sessions(db)
+
+    def latest_plan_snapshot(self, db: Session) -> PlanSnapshotModel | None:
+        return self._latest_plan_snapshot(db)
 
     def training_response(self, db: Session) -> TrainingResponse | None:
         derived = self._derive_training_response(db)
@@ -379,18 +407,25 @@ class PlanningStateResolver:
             exercises = tuple(
                 PerformedExercise(
                     exercise_id=exercise.exercise_id,
+                    planned_exercise_id=exercise.planned_exercise_id,
+                    substitution_reason=exercise.substitution_reason,
                     sets=tuple(
                         PerformedSet(
                             set_number=item.set_number,
+                            completed=item.completed,
+                            completed_at=item.completed_at,
                             reps=item.reps,
                             load_kg=item.load_kg,
                             rir=item.rir,
                             rpe=item.rpe,
                             duration_seconds=item.duration_seconds,
                             distance_m=item.distance_m,
+                            set_type=SetType(item.set_type),
                         )
                         for item in exercise.sets
                     ),
+                    group_type=None if exercise.group_type is None else ExerciseGroupType(exercise.group_type),
+                    group_id=exercise.group_id,
                 )
                 for exercise in payload.exercises
             )
@@ -405,6 +440,10 @@ class PlanningStateResolver:
                     avg_hr_bpm=payload.avg_hr_bpm,
                     max_hr_bpm=payload.max_hr_bpm,
                     distance_m=payload.distance_m,
+                    modality=payload.modality,
+                    avg_power_w=payload.avg_power_w,
+                    avg_cadence_rpm=payload.avg_cadence_rpm,
+                    interval_structure=payload.interval_structure,
                     exercises=exercises,
                 )
             )

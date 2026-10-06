@@ -383,3 +383,20 @@ class ExerciseSelector:
         if not options:
             raise ValueError(f"No eligible exercise for movement pattern={movement_pattern}")
         return sorted(options, key=lambda x: (x.fatigue, -x.strength, x.exercise_id))[0]
+
+    def substitutions(self, env: TrainingEnvironment, exercise_id: str) -> tuple[Exercise, ...]:
+        source = next((item for item in self.exercises if item.exercise_id == exercise_id), None)
+        if source is None:
+            raise ValueError(f"Unknown exercise_id={exercise_id}")
+        eligible = {
+            item.exercise_id: item
+            for item in self.eligible(env, source.movement_pattern)
+            if item.exercise_id != exercise_id
+        }
+        preferred = [eligible[item] for item in source.alternatives if item in eligible]
+        preferred_ids = {item.exercise_id for item in preferred}
+        remaining = sorted(
+            (item for item in eligible.values() if item.exercise_id not in preferred_ids),
+            key=lambda item: (item.fatigue, -item.strength, item.exercise_id),
+        )
+        return tuple(preferred + remaining)
